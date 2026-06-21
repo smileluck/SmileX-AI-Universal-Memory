@@ -313,9 +313,12 @@ cache.insert("k", "v", ttl=60)
 
 ### 5.1 立即可做(无阻塞)
 
-1. **Layer 0 数据模型实现**(以主文档 §5 为准,StrEnum 化 + ULID + MessagePack 序列化)
-2. **Layer 1 完整 DDL 编写**(以主文档 §6.1 字段为准,融合模块文档 02 的 DDL 语法)
-3. **更新 ADR-002**(修正为 sqlite-vec)
+1. ✅ **Layer 0 数据模型实现**(以主文档 §5 为准,StrEnum 化 + ULID + MessagePack 序列化)— **2026-06-21 完成**
+   - 6 StrEnums + 7 dataclasses + msgpack 序列化
+   - 58 个单元测试全过
+   - 详见 `src/smilex/memory/models/` 与 `tests/unit/`
+2. **Layer 1 完整 DDL 编写**(以主文档 §6.1 字段为准,融合模块文档 02 的 DDL 语法)— **下一阶段**
+3. **更新 ADR-002**(修正为 sqlite-vec)— **待文档侧处理**
 
 ### 5.2 需先补文档
 
