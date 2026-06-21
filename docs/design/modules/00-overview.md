@@ -20,7 +20,10 @@ docs/design/
     ├── 04-layer3-scheduling.md    # 调度+冷启动：触发器/Bootstrap
     ├── 05-layer4-concurrency.md   # 并发控制：锁/冲突/CAS
     ├── 06-layer5-quality.md       # 知识质量：矛盾/提升/归档
-    └── 07-graph-noise-control.md  # ★图谱噪声与存储控制（横切关注点）
+    ├── 07-graph-noise-control.md  # 图谱噪声与存储控制（横切关注点）
+    ├── 08-graph-category-research.md # 业界图谱品类调研与差距分析
+    ├── 09-key-migration-designs.md # 三大可迁移思想深度设计
+    └── 10-personal-growth.md      # ★个人学习成长模块（跨项目能力追踪）
 ```
 
 ## 每个模块文档的统一结构
