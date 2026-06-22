@@ -24,7 +24,9 @@ docs/design/
     ├── 08-graph-category-research.md # 业界图谱品类调研与差距分析
     ├── 09-key-migration-designs.md # 三大可迁移思想深度设计
     ├── 10-personal-growth.md      # 个人学习成长模块（跨项目能力追踪）
-    └── 11-project-export.md       # ★项目记忆导出与共享（Git 友好）
+    ├── 11-project-export.md       # ★项目记忆导出与共享（Git 友好）
+    ├── 12-mvp-execution-plan.md   # ★MVP 执行计划（WBS + 周交付 + 验收）
+    └── EXECUTION_PLAN_GAPS.md     # ★文档缺口评估（决策 D1-D4）
 ```
 
 ## 每个模块文档的统一结构
