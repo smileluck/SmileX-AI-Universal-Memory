@@ -50,7 +50,7 @@
 | L1.7 | SQLiteEngine(aiosqlite + WAL pragma + 扩展加载) | 1.5 | L1.6 | ✅ 2026-06-21 |
 | L1.8 | 查询 — temporal(query_at_time / query_in_range) | 1 | L1.7 | ✅ 2026-06-21 |
 | L1.9 | 查询 — spatial(query_in_area / query_in_location) | 1 | L1.7 | ✅ 2026-06-21 |
-| L1.10 | 查询 — graph(find_path / find_n_degree_relations) | 1.5 | L1.7 | ⏳ |
+| L1.10 | 查询 — graph(find_path / find_n_degree_relations) | 1.5 | L1.7 | ✅ 2026-06-21 |
 | L1.11 | 查询 — causal(trace_causal_chain) | 1 | L1.7 | ⏳ |
 | L1.12 | 查询 — scope filter 应用 | 0.5 | L1.8-L1.11 | ⏳ |
 | L1.13 | hybrid_search(RRF fusion) | 1.5 | L1.8-L1.11 | ⏳ |
