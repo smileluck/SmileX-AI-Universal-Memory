@@ -41,12 +41,12 @@
 
 | ID | 任务 | 人天 | 依赖 | 状态 |
 |----|------|------|------|------|
-| L1.1 | 融合 DDL(主文档字段 + 模块文档语法) — 7 张核心表 | 2 | — | ⏳ |
-| L1.2 | DDL — `project_current_state` + 触发器(§6.3) | 1 | L1.1 | ⏳ |
-| L1.3 | DDL — `memory_l0_snapshot` 表 | 0.3 | L1.1 | ⏳ |
-| L1.4 | DDL — sqlite-vec 虚拟表(`memory_vectors`) | 0.5 | L1.1 | ⏳ |
-| L1.5 | DDL — R-tree 虚拟表(`memory_locations_rtree`) | 0.5 | L1.1 | ⏳ |
-| L1.6 | Schema 版本化(PRAGMA user_version + migrations) | 1 | L1.1-L1.5 | ⏳ |
+| L1.1 | 融合 DDL(主文档字段 + 模块文档语法) — 9 张表 + 2 虚拟表 | 2 | — | ✅ 2026-06-21 |
+| L1.2 | DDL — `project_current_state` + 触发器(§6.3) | 1 | L1.1 | ✅ 合并到 L1.1 |
+| L1.3 | DDL — `memory_l0_snapshot` 表 | 0.3 | L1.1 | ✅ 合并到 L1.1 |
+| L1.4 | DDL — sqlite-vec 虚拟表(`memory_vectors`) | 0.5 | L1.1 | ✅ 合并到 L1.1 |
+| L1.5 | DDL — R-tree 虚拟表(`memory_locations_rtree`) | 0.5 | L1.1 | ✅ 合并到 L1.1 |
+| L1.6 | Schema 版本化(PRAGMA user_version + migrations) | 1 | L1.1-L1.5 | ✅ 合并到 L1.1 |
 | L1.7 | SQLiteEngine(aiosqlite + WAL pragma + 扩展加载) | 1.5 | L1.6 | ⏳ |
 | L1.8 | 查询 — temporal(query_at_time / query_in_range) | 1 | L1.7 | ⏳ |
 | L1.9 | 查询 — spatial(query_in_area / query_in_location) | 1 | L1.7 | ⏳ |
@@ -58,7 +58,7 @@
 | L1.15 | 集成测试 + benchmark(P99 < 50ms write) | 1 | L1.14 | ⏳ |
 
 **关键风险**:
-- DDL 字段冲突(主文档 §6.1 vs 模块文档 02)→ **L1.1 必须先冻结字段**
+- ~~DDL 字段冲突(主文档 §6.1 vs 模块文档 02)→ L1.1 必须先冻结字段~~ ✅ 已解决(见 L1.1 决策)
 - sqlite-vec 与 aiosqlite 集成(同步扩展加载 + 异步查询)→ L1.7 可能需要 adapt
 
 ---

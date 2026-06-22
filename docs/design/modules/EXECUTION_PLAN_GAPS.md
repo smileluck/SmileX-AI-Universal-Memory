@@ -56,6 +56,29 @@
 - [ ] §17 ADR-012 标注此偏离
 - [ ] Layer 2 实施时使用 LRUCache
 
+### D6: scope 字段存"全路径" + relation_type 扩展状态跟踪值(L1.1 决策)
+
+**决策**:
+1. **scope 列存全路径**: `"project:abc"` / `"tenant:xyz"` / `"global"`,不是 §5.2 MemoryScope 枚举的简单字符串
+2. **relation_type 扩展**: 在 §5.2 四值基础上,加入 §6.3 触发器需要的 `'project_state'/'task_status'/'config'`
+
+**理由**:
+- §6.3 触发器语义是 `NEW.scope LIKE 'project:%'`,需要在同一列携带类型 + ID
+- §6.3 触发器 WHEN 子句使用 `relation_type IN ('project_state', 'task_status', 'config')`,与 §5.2 的 4 值冲突
+- MVP 阶段允许 relation_type 并存(图谱语义 + 状态跟踪),P1 重构时考虑引入独立的 `predicate_category` 列
+
+**实施影响**:
+- DDL: 所有含 scope 列的表 CHECK 改为 `scope = 'global' OR scope LIKE 'project:%' OR scope LIKE 'tenant:%'`
+- DDL: triples 表 relation_type CHECK 扩展为 7 值
+- Layer 1 StorageEngine(L1.7): 需实现 Layer 0 enum ↔ Layer 1 全路径互转的适配器
+- Layer 0 MemoryScope enum 不变(保持 Python API 简洁)
+- Layer 0 ScopeFilter.matches() 已支持 scope_id 参数,适配 OK
+
+**待办**:
+- [ ] 主文档 §6.3 触发器与新 DDL 对齐(已对齐,文档无需改)
+- [ ] 主文档 §5.2 备注 scope 列存全路径,Layer 0 ↔ Layer 1 转换说明
+- [ ] P1 阶段重构:引入 predicate_category 列(技术债)
+
 ---
 
 ## 1. 总体结论
