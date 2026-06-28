@@ -54,7 +54,7 @@
 | L1.11 | 查询 — causal(trace_causal_chain) | 1 | L1.7 | ✅ 2026-06-21 |
 | L1.12 | 查询 — scope filter 应用 | 0.5 | L1.8-L1.11 | ✅ 2026-06-21 |
 | L1.13 | hybrid_search(RRF fusion) | 1.5 | L1.8-L1.11 | ✅ 2026-06-21 |
-| L1.14 | StorageEngine 接口封装 | 1 | L1.7-L1.13 | ⏳ |
+| L1.14 | StorageEngine 接口封装 | 1 | L1.7-L1.13 | ✅ 2026-06-21 |
 | L1.15 | 集成测试 + benchmark(P99 < 50ms write) | 1 | L1.14 | ⏳ |
 
 **关键风险**:
