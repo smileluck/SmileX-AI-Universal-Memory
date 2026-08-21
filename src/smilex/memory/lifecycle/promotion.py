@@ -1,0 +1,182 @@
+"""PromotionManager — L0→L1 晋升规则(主文档 §7.3,L2.8).
+
+Per 主文档 §7.3 记忆流转 + 模块文档 03 §3.3(L0 溢出策略):
+- FuzzyMemory 超过 800 tokens 时晋升到 L1 短时记忆
+- 晋升 = 写入 temporal_fragments(layer='L1')+ 向量(VectorStore),再从 L0 移除
+- 提供显式 promote API + 自动检查钩子(put 时检查 / check_session 扫描)
+
+事务约定同 queries/ 与 vector_store: 所有 async 方法接收 aiosqlite.Connection,
+由调用方管理事务(如 SQLiteEngine.transaction()),本类不主动 commit.
+
+使用方法:
+    promo = PromotionManager(l0, vector_store=store)
+    async with engine.transaction() as conn:
+        mid = await promo.put(conn, "sess_1", memory, scope_id="proj_a")
+    # 超阈值自动晋升;显式晋升:
+    # await promo.promote(conn, "sess_1", mid, scope_id="proj_a")
+"""
+
+from __future__ import annotations
+
+import json
+from typing import TYPE_CHECKING
+
+import aiosqlite
+
+from ...utils.timeutil import to_iso
+from ..models import FuzzyMemory, MemoryLayer
+from ..storage.storage_engine import scope_path
+from .token_counter import TokenCounter
+
+if TYPE_CHECKING:
+    from ..storage.vector_store import VectorStore
+    from .l0_working_memory import L0WorkingMemory
+
+# 模块文档 03 §3.3: L0 超 800 tokens 触发晋升(溢出)
+L0_PROMOTION_THRESHOLD = 800
+
+
+class PromotionManager:
+    """L0→L1 晋升管理 — 阈值检查 + 写入存储/向量 + L0 移除.
+
+    Args:
+        l0: L0 工作记忆
+        vector_store: 向量存储(None 时晋升只写 temporal_fragments,不写向量)
+        token_counter: token 计数器(None 时新建默认实例)
+        threshold: 晋升阈值(默认 800 tokens)
+    """
+
+    def __init__(
+        self,
+        l0: L0WorkingMemory,
+        *,
+        vector_store: VectorStore | None = None,
+        token_counter: TokenCounter | None = None,
+        threshold: int = L0_PROMOTION_THRESHOLD,
+    ) -> None:
+        self._l0 = l0
+        self._vector_store = vector_store
+        self._counter = token_counter or TokenCounter()
+        self._threshold = threshold
+
+    @property
+    def threshold(self) -> int:
+        return self._threshold
+
+    # ==================== 检查 ====================
+
+    def needs_promotion(self, memory: FuzzyMemory) -> bool:
+        """判断一条记忆是否超过晋升阈值(content token 数 > threshold)."""
+        return self._counter.count_memory(memory) > self._threshold
+
+    # ==================== 写入钩子 ====================
+
+    async def put(
+        self,
+        conn: aiosqlite.Connection,
+        session_id: str,
+        memory: FuzzyMemory,
+        *,
+        scope_id: str | None = None,
+        auto_promote: bool = True,
+    ) -> str:
+        """写入 L0 并按阈值自动晋升(自动检查钩子),返回 memory.id.
+
+        Args:
+            conn: aiosqlite 连接(事务由调用方管理)
+            session_id: 会话 ID
+            memory: 待写入的 FuzzyMemory
+            scope_id: 项目/租户 ID(scope 为 PROJECT/TENANT 时必需)
+            auto_promote: 超过阈值时是否立即晋升(False 则只写入 L0)
+        """
+        self._l0.put(session_id, memory)
+        if auto_promote and self.needs_promotion(memory):
+            await self.promote(conn, session_id, memory.id, scope_id=scope_id)
+        return memory.id
+
+    # ==================== 晋升 ====================
+
+    async def promote(
+        self,
+        conn: aiosqlite.Connection,
+        session_id: str,
+        memory_id: str,
+        *,
+        scope_id: str | None = None,
+    ) -> bool:
+        """显式晋升一条 L0 记忆到 L1,返回是否晋升成功.
+
+        步骤(§7.3):
+        1. 写入 temporal_fragments(layer='L1')
+        2. 写入向量(VectorStore.add_text, fragment_id=memory.id)
+        3. 从 L0 移除
+
+        Args:
+            conn: aiosqlite 连接(事务由调用方管理)
+            session_id: 会话 ID
+            memory_id: 待晋升的记忆 ID
+            scope_id: 项目/租户 ID(scope 为 PROJECT/TENANT 时必需)
+
+        Returns:
+            False: L0 中不存在该记忆;True: 晋升完成
+
+        Raises:
+            ValueError: content 为空(无法检索的记忆不晋升)
+        """
+        memory = self._l0.get(session_id, memory_id)
+        if memory is None:
+            return False
+        if memory.content is None:
+            raise ValueError(f"记忆 {memory_id} content 为空,无法晋升到 L1")
+
+        scope_str = scope_path(memory.scope, scope_id)
+        memory.layer = MemoryLayer.L1_SHORT
+        memory.touch()
+        await conn.execute(
+            "INSERT INTO temporal_fragments(id, fragment_id, time_start, time_end, "
+            "content, entities, relations, scope, layer, importance, "
+            "created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'L1', ?, ?, ?)",
+            (
+                memory.id,
+                memory.id,
+                to_iso(memory.created_at),
+                to_iso(memory.expires_at) if memory.expires_at else None,
+                memory.content,
+                json.dumps(memory.entities),
+                json.dumps(memory.relations),
+                scope_str,
+                memory.importance,
+                to_iso(memory.created_at),
+                to_iso(memory.updated_at),
+            ),
+        )
+        if self._vector_store is not None:
+            await self._vector_store.add_text(
+                conn, memory.content, fragment_id=memory.id
+            )
+        # 存储写入成功后才从 L0 移除
+        self._l0.remove(session_id, memory_id)
+        return True
+
+    async def check_session(
+        self,
+        conn: aiosqlite.Connection,
+        session_id: str,
+        *,
+        scope_id: str | None = None,
+    ) -> list[str]:
+        """扫描会话中所有超过阈值的记忆并晋升,返回晋升的 memory_id 列表."""
+        promoted: list[str] = []
+        for memory in self._l0.list(session_id):
+            if memory.content is None or not self.needs_promotion(memory):
+                continue
+            if await self.promote(conn, session_id, memory.id, scope_id=scope_id):
+                promoted.append(memory.id)
+        return promoted
+
+
+__all__ = [
+    "L0_PROMOTION_THRESHOLD",
+    "PromotionManager",
+]
