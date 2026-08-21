@@ -1,0 +1,16 @@
+# AI Agent 项目模板(§9.5.1)
+name: "AI Agent"
+description: "AI Agent 项目模板:LLM + 工具 + 提示词 + 记忆 + 规划器"
+match:
+  tech_stack: ["langchain", "openai", "anthropic", "llamaindex", "pytorch", "transformers"]
+skeleton_entities:
+  - {type: concept, name: "LLM"}
+  - {type: concept, name: "Tool"}
+  - {type: concept, name: "Prompt Template"}
+  - {type: concept, name: "Agent Memory"}
+  - {type: concept, name: "Planner"}
+skeleton_triples:
+  - {subject: "Planner", predicate: "orchestrates", object: "LLM"}
+  - {subject: "LLM", predicate: "invokes", object: "Tool"}
+  - {subject: "Prompt Template", predicate: "conditions", object: "LLM"}
+  - {subject: "Agent Memory", predicate: "informs", object: "Planner"}

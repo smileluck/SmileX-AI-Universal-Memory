@@ -1,0 +1,16 @@
+# Web 应用项目模板(§9.5.1 / 04-layer3 §2.3)
+name: "Web Application"
+description: "Web 应用项目模板:HTTP API + 数据库 + 认证 + 前端 + 部署"
+match:
+  tech_stack: ["fastapi", "django", "flask", "express", "react", "vue", "next.js"]
+skeleton_entities:
+  - {type: concept, name: "HTTP API"}
+  - {type: concept, name: "Database"}
+  - {type: concept, name: "Authentication"}
+  - {type: concept, name: "Frontend UI"}
+  - {type: concept, name: "Deployment"}
+skeleton_triples:
+  - {subject: "HTTP API", predicate: "depends_on", object: "Database"}
+  - {subject: "HTTP API", predicate: "protected_by", object: "Authentication"}
+  - {subject: "Frontend UI", predicate: "calls", object: "HTTP API"}
+  - {subject: "Deployment", predicate: "hosts", object: "HTTP API"}

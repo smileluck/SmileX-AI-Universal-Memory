@@ -1,0 +1,16 @@
+# CLI 工具项目模板(§9.5.1)
+name: "CLI Tool"
+description: "命令行工具项目模板:入口 + 参数解析 + 配置 + 日志 + 打包分发"
+match:
+  tech_stack: ["click", "typer", "argparse", "clap", "cobra"]
+skeleton_entities:
+  - {type: concept, name: "Entry Point"}
+  - {type: concept, name: "Argument Parser"}
+  - {type: concept, name: "Config File"}
+  - {type: concept, name: "Logging"}
+  - {type: concept, name: "Packaging"}
+skeleton_triples:
+  - {subject: "Entry Point", predicate: "delegates_to", object: "Argument Parser"}
+  - {subject: "Argument Parser", predicate: "reads", object: "Config File"}
+  - {subject: "Entry Point", predicate: "emits", object: "Logging"}
+  - {subject: "Packaging", predicate: "distributes", object: "Entry Point"}

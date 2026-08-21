@@ -1,0 +1,16 @@
+# 数据工程项目模板(§9.5.1)
+name: "Data Pipeline"
+description: "数据工程项目模板:数据源 + ETL + 存储 + 数据质量 + 调度"
+match:
+  tech_stack: ["pandas", "spark", "airflow", "dbt", "kafka", "duckdb"]
+skeleton_entities:
+  - {type: concept, name: "Data Source"}
+  - {type: concept, name: "ETL Pipeline"}
+  - {type: concept, name: "Data Store"}
+  - {type: concept, name: "Data Quality"}
+  - {type: concept, name: "Job Scheduler"}
+skeleton_triples:
+  - {subject: "ETL Pipeline", predicate: "extracts_from", object: "Data Source"}
+  - {subject: "ETL Pipeline", predicate: "loads_into", object: "Data Store"}
+  - {subject: "Data Quality", predicate: "validates", object: "Data Store"}
+  - {subject: "Job Scheduler", predicate: "triggers", object: "ETL Pipeline"}
