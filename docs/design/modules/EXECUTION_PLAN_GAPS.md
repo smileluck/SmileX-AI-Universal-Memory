@@ -15,9 +15,9 @@
 **权威依据**: [`docs/analyse/embedding-layer.md`](../../analyse/embedding-layer.md)「方案1: SQLite + sqlite-vec + NetworkX」是第一梯队推荐,sqlite-vec 适配度 10/10。该文档**修正了 ADR-002**(ADR-002 写"MVP 用 ChromaDB")。
 
 **待办**:
-- [ ] 主文档 §17 ADR-002 应更新为「MVP 用 sqlite-vec,ChromaDB 不再纳入」
-- [ ] §14.2 MVP 阻塞性依赖条目应明确为「sqlite-vec Windows 可用性」,删除 cachebox 之外的项
-- [ ] §19.1 技术栈表应把 ChromaDB 移除或降级为 P5 备选
+- [x] 主文档 §17 ADR-002 应更新为「MVP 用 sqlite-vec,ChromaDB 不再纳入」— 已更新(2026-08-21)
+- [x] §14.2 MVP 阻塞性依赖条目应明确为「sqlite-vec Windows 可用性」,删除 cachebox 之外的项 — 已标注 Windows 验证通过(2026-08-21)
+- [x] §19.1 技术栈表应把 ChromaDB 移除或降级为 P5 备选 — 已降级并删除行(2026-08-21)
 
 ### D2: NetworkX 锁定为 L3 语义层选型(方案一)
 
@@ -52,9 +52,9 @@
 - 文档 §7.2 代码示例需重写
 
 **待办**:
-- [ ] 主文档 §7.2 更新代码示例
-- [ ] §17 ADR-012 标注此偏离
-- [ ] Layer 2 实施时使用 LRUCache
+- [x] 主文档 §7.2 更新代码示例 — 已改为 LRUCache 真实 API(2026-08-21)
+- [x] §17 ADR-012 标注此偏离 — 已补充 API 漂移说明(2026-08-21)
+- [x] Layer 2 实施时使用 LRUCache — 已落实(`src/smilex/memory/lifecycle/l0_working_memory.py`)
 
 ### D6: scope 字段存"全路径" + relation_type 扩展状态跟踪值(L1.1 决策)
 
@@ -75,8 +75,8 @@
 - Layer 0 ScopeFilter.matches() 已支持 scope_id 参数,适配 OK
 
 **待办**:
-- [ ] 主文档 §6.3 触发器与新 DDL 对齐(已对齐,文档无需改)
-- [ ] 主文档 §5.2 备注 scope 列存全路径,Layer 0 ↔ Layer 1 转换说明
+- [x] 主文档 §6.3 触发器与新 DDL 对齐(已对齐,文档无需改)
+- [x] 主文档 §5.2 备注 scope 列存全路径,Layer 0 ↔ Layer 1 转换说明 — 已补充(2026-08-21)
 - [ ] P1 阶段重构:引入 predicate_category 列(技术债)
 
 ---
@@ -212,6 +212,8 @@ class CloneResult: ...         # 克隆结果
 
 **建议**: MVP 必需 `ProjectContext`,其余可推迟到 P1(批量导入)/ P2(跨项目克隆)。
 
+**状态(2026-08-21)**: `ProjectContext` 已于 MVP 落地(middlewares/dto.py);`ImportSource`/`ImportResult` 已于 P1-b 落地(`scheduler/bootstrap/bulk_importer.py`,支持 git/markdown/text);`CloneFilter`/`CloneResult` 已于 P2-a 落地(`scheduler/bootstrap/cross_project_cloner.py`,实体类型/层/时间过滤 + ID 重映射 + 溯源)。
+
 ### 3.5 Embedding 方案未指定
 
 **问题**: sqlite-vec 不自带 embedding,需要外部模型把文本转向量。
@@ -287,8 +289,8 @@ cache.insert("k", "v", ttl=60)
   - **方案 D**: 切换到 `cachetools.TTLCache`(API 更接近文档假设,但 cachebox 的 Cython 加速优势消失)
 
 **待办**:
-- [ ] 主文档 §7.2 代码示例改为真实 API(LRUCache + 应用层清理)
-- [ ] §17 ADR-012 补充 cachebox 6.x API 漂移说明
+- [x] 主文档 §7.2 代码示例改为真实 API(LRUCache + 应用层清理)— 已更新(2026-08-21)
+- [x] §17 ADR-012 补充 cachebox 6.x API 漂移说明 — 已补充(2026-08-21)
 - [x] 决策 L0 用哪个方案 → **B(见 D4)**
 
 ---

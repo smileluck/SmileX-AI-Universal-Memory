@@ -389,6 +389,8 @@ class PreemptionPolicy(Enum):
 ### 5.2 核心 Dataclass 签名
 
 > 仅展示字段签名，完整实现见 `src/memory/models/`
+>
+> **存储备注（决策 D6）**：存储层 `scope` 列存**全路径**字符串（`"global"` / `"project:<id>"` / `"tenant:<id>"`)，而非 `MemoryScope` 枚举的简单字符串；Layer 0 ↔ Layer 1 之间由 StorageEngine 适配器互转，Layer 0 的 `MemoryScope` 枚举保持不变（Python API 简洁）。
 
 ```python
 @dataclass
@@ -504,6 +506,9 @@ class ScopeFilter:
 | `checkpoints` | 任务检查点 | `id, task_id, progress, step, state, cursor` | B-tree on `task_id` |
 | `project_current_state` ★ | 项目当前状态汇总 | `scope, subject_id, predicate, object_id, object_value, valid_from, confidence` | PRIMARY KEY `(scope, subject_id, predicate)` |
 | `memory_l0_snapshot` ★ | L0 工作记忆快照 | `session_id, data, updated_at, expires_at` | PRIMARY KEY `session_id` |
+| `triples_archive` ★(P2,schema 011) | 历史三元组归档(冷热分层) | 与 `triples` 同构 + `archived_at` | B-tree on `(scope, valid_from)` + `valid_to` |
+| `temporal_fragments_archive` ★(P2,schema 011) | 历史时序片段归档 | 与 `temporal_fragments` 同构 + `archived_at`(embedding 置 NULL,不保留向量) | B-tree on `(scope, time_start)` + `updated_at` |
+| `predicate_dict` ★(P2,schema 011) | predicate 字典编码 | `code INTEGER PK, predicate UNIQUE`;`triples.predicate_code` 冗余编码列(读取仍走 TEXT) | UNIQUE on `predicate` |
 
 ### 6.2 SQLite 类型映射
 
@@ -513,7 +518,7 @@ class ScopeFilter:
 | TIMESTAMPTZ | `TEXT` | ISO 8601 字符串 |
 | JSONB | `TEXT` | JSON1 扩展解析 |
 | UUID[] | `TEXT`（JSON 数组）| JSON1 查询 |
-| vector(1536) | `FLOAT[1536]`（sqlite-vec）| 虚拟表 |
+| vector(1024) | `FLOAT[1024]`（sqlite-vec）| 虚拟表（维度按决策 D5 统一为 1024，对齐 BGE-M3）|
 | GEOMETRY(POINT) | R-tree 虚拟表 | `min_lng, max_lng, min_lat, max_lat` |
 
 ### 6.3 项目记忆当前状态机制（SQLite 适配）
@@ -562,8 +567,12 @@ END;
 -- sqlite-vec 向量虚拟表
 CREATE VIRTUAL TABLE memory_vectors USING vec0(
     memory_id TEXT PRIMARY KEY,
-    embedding FLOAT[1536]
+    embedding FLOAT[1024]
 );
+
+-- 维度说明（决策 D5）：统一为 1024（BGE-M3 维度）。MVP 默认 HashEmbedder
+-- （零依赖、确定性输出 1024 维），可选后端 SentenceTransformerEmbedder
+-- 经 embedding extra 安装。
 
 -- KNN 检索
 SELECT memory_id, distance FROM memory_vectors
@@ -637,29 +646,48 @@ class StorageEngine:
 ### 7.2 L0 工作记忆缓存架构（核心决策）
 
 ```python
-from cachebox import TTLPrefixCache
+from cachebox import LRUCache
 
 class L0WorkingMemory:
+    """cachebox 6.x 真实 API（决策 D4）：纯 LRU,不启用 TTL。
+
+    会话过期由应用层主动清理(MemoryMiddleware.close_session →
+    clear_session / 进程退出钩子 → clear),持久化由 SQLite 快照负责。
+    """
+
     def __init__(self, sqlite_conn):
-        self.hot = TTLPrefixCache(maxsize=1000, ttl=3600, policy="lru")
+        self.hot = LRUCache(maxsize=1000)   # 最多 1000 个活跃会话
         self.db = sqlite_conn
 
     async def get(self, session_id: str) -> Optional[bytes]:
-        if data := self.hot.get(session_id):       # 亚微秒
+        data = self.hot.get(session_id)      # 亚微秒
+        if data is not None:
             return data
         cursor = await self.db.execute(
             "SELECT data FROM memory_l0_snapshot WHERE session_id=?",
             (session_id,)
         )
-        if row := await cursor.fetchone():          # 毫秒
-            self.hot.set(session_id, row[0])
+        if row := await cursor.fetchone():   # 毫秒
+            self.hot.insert(session_id, row[0])
             return row[0]
         return None
 
     async def set(self, session_id: str, data: bytes):
-        self.hot.set(session_id, data)
+        self.hot.insert(session_id, data)
         await self._dump_to_sqlite(session_id, data)  # 异步每 5s
+
+    def clear_session(self, session_id: str) -> None:
+        """会话结束/项目卸载时由上层主动调用(决策 D4)."""
+        self.hot.pop(session_id, None)
+
+    def clear(self) -> None:
+        """进程退出钩子:清空所有会话."""
+        self.hot.clear()
 ```
+
+> **cachebox 6.x API 漂移说明**（决策 D4 / EXECUTION_PLAN_GAPS §3.9）:cachebox 不提供
+> `TTLPrefixCache`,TTL 与 LRU 不可合并;写入方法是 `insert()` 而非 `set()`。
+> 因此 L0 采用纯 `LRUCache(maxsize=1000)`,过期语义交给应用层清理。
 
 ### 7.3 记忆流转（晋升规则）
 
@@ -1260,19 +1288,20 @@ async function initialize_project(meta, template=None):
 - Layer 0 完整数据模型（6 dataclass + 6 枚举）
 - Layer 1 SQLite schema（7 张核心表 + 触发器）
 - Layer 1 sqlite-vec 集成（向量检索）
-- Layer 2 L0（cachebox）+ L1（ChromaDB）+ ContextBuilder
+- Layer 2 L0（cachebox）+ L1（sqlite-vec，决策 D1）+ ContextBuilder
 - Layer 3 冷启动最小集（向导 + 模板 + 主动学习）
 - MemoryMiddleware 最小接口（`initialize_project` + `write` + `recall`）
 
-**退出标准**：
-- ✅ `pip install smilex-memory` 可用
-- ✅ 新项目 < 5 分钟可用
-- ✅ 写入 P99 < 50ms，检索 P99 < 500ms
-- ✅ 冷启动 Top-5 召回率 > 60%
+**退出标准**（实测 2026-08-21，全部达标 ✅）：
+- ✅ `pip install smilex-memory` 可用 — `uv build` 生成 wheel + sdist，临时干净 venv 安装后 `import smilex; smilex.__version__` 正常（0.1.0）
+- ✅ 新项目 < 5 分钟可用 — 实测 engine 初始化 + `initialize_project` ≈ 13ms，首次 recall ≈ 0.03ms
+- ✅ 写入 P99 < 50ms，检索 P99 < 500ms — 实测写入 P99 ≈ 2.9ms（1000 样本），检索 P99 ≈ 6.6ms（100 样本，token budget 4000）
+- ✅ 冷启动 Top-5 召回率 > 60% — 实测 8/8 = 100%（确定性关键词 + 图通道）
+- ✅ 全量测试 433 passed；E2E（创建→写入→检索）通过
 
-**阻塞性依赖**：
-- sqlite-vec Python 绑定可用性
-- cachebox Windows 兼容性验证
+**阻塞性依赖**（已在 Windows 验证 ✅）：
+- sqlite-vec Python 绑定可用性 — ✅ Windows 可用（烟雾测试通过）
+- cachebox Windows 兼容性验证 — ✅ 通过（注意 API 漂移，见 ADR-012 / 决策 D4）
 
 ### 14.3 P0 阶段（2 周）
 
@@ -1281,10 +1310,10 @@ async function initialize_project(meta, template=None):
 - Layer 3 GRACEFUL 抢占 + Checkpoint
 - 5 类核心任务（整合/遗忘/摘要/因果/语义）
 
-**退出标准**：
-- ✅ 整合任务自动 L1→L2 流转
-- ✅ 长任务可被抢占 + 续传
-- ✅ 自适应规则触发冷却正确
+**退出标准**（实测 2026-08-21，全部达标 ✅，覆盖于 `tests/unit/test_core_tasks.py`）：
+- ✅ 整合任务自动 L1→L2 流转 — 实测：3 条同实体 L1 片段经整合任务聚合为 1 条 L2（importance 取组内最大、实体并集），源片段删除；不足 min_group 的单条保留 L1，重跑幂等
+- ✅ 长任务可被抢占 + 续传 — 实测：12 条片段分 12 批整合，第 3 批检查点后 GRACEFUL 抢占 → PAUSED 且 checkpoint 落库（cursor=已扫描游标），resume 后从断点续扫，正确产出 4 条 L2 且不重复
+- ✅ 自适应规则触发冷却正确 — 实测：条件持续为真时两次触发间隔 ≥ cooldown，冷却期内（0.2s < 0.4s）不重复触发
 
 ### 14.4 P1 阶段（3 周）
 
@@ -1295,9 +1324,9 @@ async function initialize_project(meta, template=None):
 - Layer 5 矛盾检测（同步）
 
 **退出标准**：
-- ✅ 多任务链并发无 lost update
-- ✅ Git 历史可批量导入
-- ✅ 矛盾检测准确率 > 90%
+- ✅ 多任务链并发无 lost update（实测 2026-08-21，P1-a 达标，覆盖于 `tests/unit/test_lock_manager.py` / `tests/unit/test_conflict.py`）：① 两条并发链对同一资源读-改-写，EXCLUSIVE 锁序列化 50×2 次递增无丢失（计数器终值=100）；② 两条链基于同一版本并发更新，后者检出 VERSION_STALE 经 AUTO_MERGE 三路合并保留双方修改（版本检查生效）；③ middleware 层两会话 `asyncio.gather` 并发覆写同一实体属性，EXCLUSIVE 锁序列化 + WRITE_WRITE 经 AUTO_LAST 放行，两条 triple 均落库无异常；另验证 MANUAL 策略下覆写返回 `WriteStatus.CONFLICT + ConflictInfo`、锁超时抛 `LockTimeoutError`
+- ✅ Git 历史可批量导入（实测 2026-08-21,P1-b 达标，覆盖于 `tests/unit/test_importer.py`):`BulkImporter`(`scheduler/bootstrap/bulk_importer.py`)支持 git/markdown/text 三类 `ImportSource`;git 走 CLI 子进程解析 `git log`（零新依赖，git 不可用抛 RuntimeError),3 提交临时仓库实测 → 3 条 L1 时序记忆（`fragment_id="git:repo:{hash}"` 幂等，锚定提交时间）+ 作者 person 实体 + 文件 object 实体 + contributes_to/contains_file 三元组；重复导入 memory_count=0（幂等）；分批 + CheckpointStore 断点续传（预置 cursor 跳过已处理提交实测 resumed=True)；markdown 目录批量（大文件按行分块）每文件一条 L1 记忆，文本批次按内容 sha256 幂等
+- ✅ 矛盾检测准确率 > 90%（实测 2026-08-21,P1-b 达标，覆盖于 `tests/unit/test_contradiction.py`):`ContradictionDetector`(`memory/quality/contradiction.py`）规则版四维检测（VALUE 枚举/单值谓词取值冲突、NUMERIC 数量超 10% 容差、TEMPORAL 半开区间重叠取值不同、CAUSAL 同键因果 + 反向因果），复用 ConflictType(VALUE/NUMERIC/TEMPORAL→WRITE_WRITE,CAUSAL→CAUSAL_CONTRADICTION);27 条标注样本（13 正例 + 13 负例 + 1 复合）实测准确率 **27/27 = 100%**
 
 ### 14.5 P2 阶段（2 周）
 
@@ -1308,9 +1337,9 @@ async function initialize_project(meta, template=None):
 - 性能优化（向量量化 + predicate 编码）
 
 **退出标准**：
-- ✅ 跨 3 项目共现自动提升准确率 > 90%
-- ✅ 10 项目/年存储 < 3 GB
-- ✅ 归档数据可按需召回
+- ✅ 跨 3 项目共现自动提升准确率 > 90% — 实测 24/24 = 100%(2026-08-21,标注集 12 正例 + 12 负例,见 `tests/unit/test_cross_project_promotion.py`;规则版 ScopePromoter,归一化键共现判定,无向量)
+- ✅ 10 项目/年存储 < 3 GB — 实测 2026-08-21(`tests/benchmarks/storage_size.py`,抽样外推:实测 1 项目 × 1 月 = 500 实体 + 2000 三元组 + 2000 片段含 1024 维向量,×120 线性外推到 10 项目/年):未优化 **1.18 GiB** / P2 优化(归档清向量 + VACUUM + predicate 字典编码)后 **1.17 GiB**,均 < 3 GB。注:归档清向量的体积收益受 sqlite-vec vec0 分块存储粒度限制(约 1000 条/chunk,碎片化删除不释放未清空 chunk);int8 量化工具(`quality/quantization.py`,4x 压缩,往返误差有界)已就绪,生产应用留待后续
+- ✅ 归档数据可按需召回 — 实测 2026-08-21(`tests/unit/test_archiver.py`):`Archiver`(quality/archiver.py,schema 011 同库 `triples_archive`/`temporal_fragments_archive` 归档表)按 §11.6 规则(历史三元组 365 天 / 片段 180 天 + 低重要度,当前状态三元组永不归档)迁移冷数据;recall 默认只查热数据,`recall(include_archived=True)` 经 `query_archived`(非向量通道:scope + 关键词)并入归档结果,或 `restore_archived`/`Archiver.restore` 显式回迁(三元组回迁临时摘除 §6.3 触发器防 LWW 污染当前状态);幂等 + 调度器挂接(register_archive_task)+ GRACEFUL 抢占断点续传实测通过
 
 ### 14.6 工作量估算（人周）
 
@@ -1459,11 +1488,12 @@ async function initialize_project(meta, template=None):
 - **权衡**：SQLite 单写者模型，高并发写需排队（WAL 缓解）
 - **回退**：通过 `StorageEngine` 接口抽象，未来可加 PG 适配器
 
-### ADR-002: 向量存储 — ChromaDB vs sqlite-vec
+### ADR-002: 向量存储 — sqlite-vec（ChromaDB 不再纳入）
 
-- **选择**：MVP 用 ChromaDB（嵌入式），未来评估切 sqlite-vec 统一
-- **理由**：ChromaDB 自带 SQLite，生态成熟；sqlite-vec 可统一到主库
-- **回退**：`VectorStore` 接口抽象，切换仅需替换适配器
+- **选择**：MVP 用 **sqlite-vec**（决策 D1 修正，原结论"MVP 用 ChromaDB"作废）
+- **理由**：符合 §1.2「单库一体化 > 多库拼装」原则——向量索引与主库同文件、同事务、零额外服务；ChromaDB 独立存储与之本质冲突。依据 `docs/analyse/embedding-layer.md`「方案1: SQLite + sqlite-vec + NetworkX」(sqlite-vec 适配度 10/10)
+- **权衡**：sqlite-vec 为暴力 KNN（无 HNSW），向量规模 > 500K 时需评估性能
+- **回退**：`VectorStore` 接口抽象，SaaS 阶段（P5）可切换 Qdrant
 
 ### ADR-003: 锁机制
 
@@ -1534,6 +1564,7 @@ async function initialize_project(meta, template=None):
 - **理由**：进程内亚微秒 + 复用主库
 - **权衡**：崩溃丢失最近 5s 数据
 - **回退**：cachebox 维护停滞时切 `functools.lru_cache`
+- **API 漂移说明（决策 D4）**：本文档原假设的 `TTLPrefixCache` / `.set()` 在 cachebox 6.x 中不存在（TTL 与 LRU 不可合并，写入方法为 `.insert()`）。L0 实际使用纯 `LRUCache(maxsize=1000)`，不启用 TTL；会话过期由应用层主动清理（`close_session` → `pop()`，进程退出钩子 → `clear()`)。详见 EXECUTION_PLAN_GAPS §3.9
 
 ### ADR-013: 服务暴露方式
 
@@ -1599,8 +1630,9 @@ src/
 |------|------|------|------|
 | 语言 | Python | ≥3.13 | 主语言 |
 | 主库 | SQLite | 3.40+ | 主存储（Python 自带）|
-| 向量 | sqlite-vec | latest | 向量索引（HNSW）|
-| 向量 | ChromaDB | latest | 语义检索 |
+| 向量 | sqlite-vec | ≥0.1.6 | 向量索引 |
+| ~~向量~~ | ~~ChromaDB~~ | — | ~~语义检索~~（决策 D1：不再纳入，SaaS 阶段 P5 备选 Qdrant）|
+| Embedding | HashEmbedder（默认，零依赖）/ BGE-M3 + sentence-transformers（可选 `embedding` extra）| ≥3.0 | 文本向量化，1024 维（决策 D5）|
 | 空间 | R-tree | SQLite 内置 | 空间索引 |
 | 缓存 | cachebox | latest | 进程内 LRU+TTL |
 | 异步 | asyncio | Python 内置 | 异步 I/O |
@@ -1658,8 +1690,8 @@ database:
     cache_size: -64000           # 64MB
 
 vector:
-  backend: chromadb              # 或 sqlite_vec
-  dimension: 1536
+  backend: sqlite_vec            # 决策 D1:ChromaDB 不再纳入
+  dimension: 1024                # 决策 D5:BGE-M3 维度
 
 cache:
   backend: cachebox

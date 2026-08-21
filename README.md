@@ -43,9 +43,9 @@ src/smilex/
 ├── middlewares/         # MemoryMiddleware(Agent 访问入口)
 ├── memory/
 │   ├── models/          # Layer 0: 数据模型
-│   ├── storage/         # Layer 1: 存储引擎
-│   ├── lifecycle/       # Layer 2: 生命周期
-│   ├── scheduler/       # Layer 3: 调度 + 冷启动
+│   ├── storage/         # Layer 1: 存储引擎(schema/ 迁移 SQL、queries/ 查询模块)
+│   ├── lifecycle/       # Layer 2: 生命周期(L0 工作记忆、Embedder、晋升)
+│   ├── scheduler/       # Layer 3: 调度 + 冷启动(bootstrap/ 项目初始化)
 │   ├── concurrency/     # Layer 4: 并发控制(P1)
 │   └── quality/         # Layer 5: 知识质量(P2)
 └── utils/

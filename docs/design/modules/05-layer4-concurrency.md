@@ -398,13 +398,14 @@ class WriteQueue:
 MVP 不实现 Layer 4，依赖 SQLite 单写者天然串行化保证一致性。P1 开始实现：
 
 ```
-src/memory/concurrency/
-├── lock_manager.py          # 内存锁 + 乐观锁
-├── conflict_detector.py     # 版本检查
-├── conflict_resolver.py     # 自动解决策略
-├── chain_coordinator.py     # 链协调
-├── wait_for_graph.py        # 死锁检测
-└── write_queue.py           # 批量写入
+src/smilex/memory/concurrency/     # P1-a 已落地(2026-08-21)
+├── lock_manager.py          # ✅ 内存锁(SHARED/EXCLUSIVE/UPDATE + 超时 + 锁排序)
+├── conflict_detection.py    # ✅ 五类冲突检测(版本追踪 + 因果环/矛盾 SQL)
+├── conflict_resolution.py   # ✅ 自动解决策略(§10.3 默认策略表)
+├── controller.py            # ✅ 三层组合门面(middleware 写入路径接入)
+├── chain_coordinator.py     # ⏳ 链协调(P2)
+├── wait_for_graph.py        # ⏳ 等待图死锁检测(P2,超时已兜底)
+└── write_queue.py           # ⏳ 批量写入(P2)
 ```
 
 ### 4.2 关键风险
