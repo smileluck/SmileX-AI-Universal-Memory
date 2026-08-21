@@ -12,7 +12,7 @@ import sqlite3
 from pathlib import Path
 
 # Schema 版本号(每次新增 .sql 文件或修改结构时 +1)
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
 
 # DDL 文件清单(按版本号顺序)
 MIGRATIONS: tuple[tuple[int, str], ...] = (
@@ -26,6 +26,7 @@ MIGRATIONS: tuple[tuple[int, str], ...] = (
     (8, "008_project_current_state.sql"),
     (9, "009_memory_l0_snapshot.sql"),
     (10, "010_virtual_tables.sql"),
+    (11, "011_archive_and_predicate_dict.sql"),
 )
 
 
@@ -53,6 +54,14 @@ def set_user_version(conn: sqlite3.Connection, version: int) -> None:
     conn.execute(f"PRAGMA user_version = {version}")
 
 
+def _vec_tables_exist(conn: sqlite3.Connection) -> bool:
+    """010 虚拟表(memory_vectors)是否已创建."""
+    row = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE name = 'memory_vectors'"
+    ).fetchone()
+    return row is not None
+
+
 def apply_migrations(
     conn: sqlite3.Connection,
     *,
@@ -71,13 +80,15 @@ def apply_migrations(
     Raises:
         sqlite3.OperationalError: DDL 执行失败
         ImportError: 010 文件应用但 sqlite-vec 未安装且 load_vec_extension=True
+
+    Note:
+        010 曾在无扩展环境下被跳过时(user_version 已越过 10 但虚拟表不存在),
+        再次以 load_vec_extension=True 打开会补建 010(按表存在性判定,
+        不回退 user_version)。
     """
     current = get_user_version(conn)
 
     for version, filename in MIGRATIONS:
-        if version <= current:
-            continue
-
         # 010_virtual_tables.sql 需要 sqlite-vec 扩展
         if version == 10:
             if load_vec_extension:
@@ -92,9 +103,21 @@ def apply_migrations(
                         f"应用 {filename} 需要 sqlite-vec 扩展,但加载失败: {e}. "
                         "请安装 sqlite-vec 或传入 load_vec_extension=False 跳过虚拟表."
                     ) from e
+                if version <= current and _vec_tables_exist(conn):
+                    continue  # 010 已应用过
+                # 曾被跳过(无扩展建库)→ 补建,但不回退 user_version
+                sql = _read_sql(filename)
+                conn.executescript(sql)
+                if version > get_user_version(conn):
+                    set_user_version(conn, version)
+                current = max(current, get_user_version(conn))
+                continue
             else:
                 # 跳过 010,版本号不更新(后续迁移不依赖 010)
                 continue
+
+        if version <= current:
+            continue
 
         sql = _read_sql(filename)
         conn.executescript(sql)

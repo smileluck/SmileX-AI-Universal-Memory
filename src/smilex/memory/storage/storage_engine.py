@@ -141,20 +141,27 @@ class StorageEngine:
         *,
         scope_id: str | None = None,
     ) -> str:
-        """写入 Triple,返回 id. 会触发 project_current_state 触发器(§6.3)."""
+        """写入 Triple,返回 id. 会触发 project_current_state 触发器(§6.3).
+
+        predicate 同时写入字典编码列 predicate_code(§11.5,读取路径不变).
+        """
+        from .predicate_codec import encode_predicate
+
         scope_str = scope_path(triple.scope, scope_id)
         async with self._engine.transaction() as conn:
+            predicate_code = await encode_predicate(conn, triple.predicate)
             await conn.execute(
                 "INSERT INTO triples(id, triple_id, subject_id, predicate, "
-                "object_id, object_value, scope, valid_from, valid_to, "
+                "predicate_code, object_id, object_value, scope, valid_from, valid_to, "
                 "predecessor_id, causal_level, confidence, certainty, "
                 "relation_type, source_closet) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     triple.id,
                     triple.triple_id,
                     triple.subject_id,
                     triple.predicate,
+                    predicate_code,
                     triple.object_id,
                     triple.object_value,
                     scope_str,

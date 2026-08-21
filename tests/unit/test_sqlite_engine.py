@@ -15,6 +15,7 @@ from pathlib import Path
 
 import pytest
 
+from smilex.memory.storage.schema import SCHEMA_VERSION
 from smilex.memory.storage.sqlite_engine import SQLiteEngine
 
 
@@ -226,17 +227,22 @@ async def test_file_db_persists_data(tmp_path: Path):
 
 @pytest.mark.asyncio
 async def test_engine_without_vec():
-    """load_vec=False 也能初始化(schema 应用到 9,user_version=9)."""
+    """load_vec=False 也能初始化(010 被跳过,其余迁移含 011 仍应用)."""
     eng = SQLiteEngine(":memory:", load_vec=False)
     await eng.initialize()
     version = await eng.get_user_version()
-    assert version == 9  # 010_virtual_tables 被跳过
+    assert version == SCHEMA_VERSION  # 011 归档表不依赖 sqlite-vec
 
     # 虚拟表不应该存在
     cursor = await eng.conn.execute(
         "SELECT name FROM sqlite_master WHERE name='memory_vectors'"
     )
     assert (await cursor.fetchone()) is None
+    # 归档表应该存在
+    cursor = await eng.conn.execute(
+        "SELECT name FROM sqlite_master WHERE name='triples_archive'"
+    )
+    assert (await cursor.fetchone()) is not None
     await eng.close()
 
 

@@ -48,16 +48,29 @@ def _apply_migrations_sync(
 
     通过 aiosqlite.Connection._execute 调度到 worker 线程执行.
     与 schema.apply_migrations() 等价,但避免重复加载 sqlite-vec.
+
+    Note:
+        010 曾在无扩展环境下被跳过(user_version 已越过 10 但虚拟表不存在)时,
+        扩展已加载则按表存在性补建 010,不回退 user_version。
     """
+    from .schema import _vec_tables_exist, get_schema_dir
+
     current = get_user_version(raw_conn)
     for version, filename in MIGRATIONS:
+        if version == 10:
+            if not vec_already_loaded:
+                # 需要先加载 sqlite-vec — 这里不允许,应该由调用方先 load
+                continue
+            if version <= current and _vec_tables_exist(raw_conn):
+                continue  # 010 已应用过
+            sql = (get_schema_dir() / filename).read_text(encoding="utf-8")
+            raw_conn.executescript(sql)
+            if version > get_user_version(raw_conn):
+                raw_conn.execute(f"PRAGMA user_version = {version}")
+            current = max(current, get_user_version(raw_conn))
+            continue
         if version <= current:
             continue
-        if version == 10 and not vec_already_loaded:
-            # 需要先加载 sqlite-vec — 这里不允许,应该由调用方先 load
-            continue
-        from .schema import get_schema_dir
-
         sql = (get_schema_dir() / filename).read_text(encoding="utf-8")
         raw_conn.executescript(sql)
         raw_conn.execute(f"PRAGMA user_version = {version}")

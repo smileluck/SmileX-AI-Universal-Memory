@@ -104,19 +104,37 @@ def test_virtual_tables_created(db_with_schema):
 
 
 def test_skip_virtual_tables_without_extension():
-    """load_vec_extension=False 应该跳过 010,但前 9 张表仍创建."""
+    """load_vec_extension=False 应该跳过 010,但其余迁移(含 011)仍应用."""
     conn = sqlite3.connect(":memory:")
     apply_migrations(conn, load_vec_extension=False)
     tables = set(list_tables(conn))
     assert "entities" in tables
     assert "triples" in tables
+    assert "triples_archive" in tables  # 011 归档表不依赖 sqlite-vec
     # memory_vectors 不应该存在
     cursor = conn.execute(
         "SELECT name FROM sqlite_master WHERE name='memory_vectors'"
     )
     assert cursor.fetchone() is None
-    # user_version 应该是 9(只到 009)
-    assert get_user_version(conn) == 9
+    # user_version 越过 010 到最新(011 不依赖虚拟表,见 schema loader docstring)
+    assert get_user_version(conn) == SCHEMA_VERSION
+    conn.close()
+
+
+def test_vec_tables_backfilled_after_skip():
+    """无扩展建库(跳过 010)后,以带扩展方式重开应补建 010 虚拟表(P2 修复)."""
+    conn = sqlite3.connect(":memory:")
+    apply_migrations(conn, load_vec_extension=False)
+    assert get_user_version(conn) == SCHEMA_VERSION
+    cursor = conn.execute("SELECT name FROM sqlite_master WHERE name='memory_vectors'")
+    assert cursor.fetchone() is None
+
+    # 重开(带 sqlite-vec): 010 被跳过过一次,按表存在性补建
+    apply_migrations(conn, load_vec_extension=True)
+    cursor = conn.execute("SELECT name FROM sqlite_master WHERE name='memory_vectors'")
+    assert cursor.fetchone() is not None
+    # user_version 不回退、不重复推进
+    assert get_user_version(conn) == SCHEMA_VERSION
     conn.close()
 
 
