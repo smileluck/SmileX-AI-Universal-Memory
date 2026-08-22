@@ -1,0 +1,45 @@
+# PyPI 发布流水线(Trusted Publishing / OIDC,免 token)
+# 触发: 推送 v* 标签(如 git tag v0.1.0 && git push origin v0.1.0)
+# 前置: PyPI 项目设置里添加 Trusted Publisher,
+#       workflow filename 填 publish.yml,environment 填 pypi
+name: publish
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+
+      - name: 构建 sdist + wheel
+        run: uv build
+
+      - name: 上传构建产物(供发布任务下载)
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  pypi:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi # 对应 PyPI trusted publisher 的 environment 字段
+    permissions:
+      id-token: write # OIDC 凭证,Trusted Publishing 必需
+    steps:
+      - name: 下载构建产物
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - uses: astral-sh/setup-uv@v5
+
+      - name: 发布到 PyPI
+        run: uv publish
