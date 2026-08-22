@@ -26,6 +26,7 @@ docs/design/
     ├── 10-personal-growth.md      # 个人学习成长模块（跨项目能力追踪）
     ├── 11-project-export.md       # ★项目记忆导出与共享（Git 友好）
     ├── 12-mvp-execution-plan.md   # ★MVP 执行计划（WBS + 周交付 + 验收）
+    ├── 13-server-layer.md         # ★Server 层：MCP 服务 / Web 面板 / 项目注入
     └── EXECUTION_PLAN_GAPS.md     # ★文档缺口评估（决策 D1-D4）
 ```
 

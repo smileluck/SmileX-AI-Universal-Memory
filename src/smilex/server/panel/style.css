@@ -1,0 +1,50 @@
+:root { color-scheme: light dark; }
+* { box-sizing: border-box; }
+body {
+  margin: 0; font-family: system-ui, "Segoe UI", sans-serif;
+  background: #0f1420; color: #dde3ee;
+}
+header {
+  display: flex; align-items: center; gap: 24px;
+  padding: 12px 24px; background: #161d2e; border-bottom: 1px solid #26304a;
+}
+h1 { font-size: 18px; margin: 0; }
+nav { display: flex; gap: 8px; }
+.tab {
+  background: none; border: 1px solid #33405e; color: #aab4cc;
+  padding: 6px 16px; border-radius: 6px; cursor: pointer; font-size: 14px;
+}
+.tab.active { background: #2b62d9; border-color: #2b62d9; color: #fff; }
+main { padding: 20px 24px; }
+.panel { display: none; }
+.panel.active { display: block; }
+h2 { font-size: 15px; color: #8fa0c0; margin: 18px 0 10px; }
+.cards { display: flex; gap: 12px; flex-wrap: wrap; }
+.card {
+  background: #161d2e; border: 1px solid #26304a; border-radius: 8px;
+  padding: 14px 20px; min-width: 130px; text-align: center;
+}
+.card .num { font-size: 20px; font-weight: 600; color: #6ea3ff; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th, td {
+  text-align: left; padding: 8px 10px;
+  border-bottom: 1px solid #223052; vertical-align: top;
+}
+th { color: #8fa0c0; font-weight: 500; }
+td.content { max-width: 520px; word-break: break-all; }
+form { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
+input, select {
+  background: #161d2e; border: 1px solid #33405e; color: #dde3ee;
+  padding: 8px 10px; border-radius: 6px; font-size: 13px;
+}
+input[name="q"], input[name="query"] { flex: 1; min-width: 240px; }
+button[type="submit"] {
+  background: #2b62d9; border: none; color: #fff;
+  padding: 8px 18px; border-radius: 6px; cursor: pointer;
+}
+pre {
+  background: #161d2e; border: 1px solid #26304a; border-radius: 8px;
+  padding: 14px; white-space: pre-wrap; word-break: break-all;
+  max-height: 320px; overflow: auto; font-size: 13px;
+}
+#recall-meta { color: #8fa0c0; font-size: 13px; margin-bottom: 8px; }

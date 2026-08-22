@@ -48,13 +48,43 @@ src/smilex/
 │   ├── scheduler/       # Layer 3: 调度 + 冷启动(bootstrap/ 项目初始化)
 │   ├── concurrency/     # Layer 4: 并发控制(P1)
 │   └── quality/         # Layer 5: 知识质量(P2)
+├── server/              # Server 层: MCP 服务 + Web 面板(可选 [server] extras)
 └── utils/
 ```
+
+## 服务化使用(MCP + Web 面板)
+
+把记忆库作为 MCP 服务接入 Kimi Code / Claude Code 等 Agent 工具:
+
+```bash
+# 安装(核心库零新依赖,server 相关依赖按需装)
+pip install 'smilex-ai-memory[server]'
+
+# 方式一: 全局常驻(推荐) — 单库 ~/.smilex/memory.db,scope 隔离多项目
+smilex-memory serve          # MCP: http://127.0.0.1:8765/mcp,面板: http://127.0.0.1:8765/
+smilex-memory init <项目目录> --guide   # 一键注入 MCP 配置 + 记忆使用约定
+
+# 方式二: 项目级 stdio — 独立库 <项目>/.smilex/memory.db
+smilex-memory init <项目目录> --stdio
+
+# 环境自检
+smilex-memory doctor
+```
+
+常驻自启动注册脚本(登录后自动 `smilex-memory serve`):
+
+- Windows: `powershell -File scripts/register-service-windows.ps1`(`-Unregister` 卸载)
+- Linux: `scripts/register-service-linux.sh`(`--uninstall` 卸载,systemd --user)
+- macOS: `scripts/register-service-macos.sh`(`--uninstall` 卸载,launchd)
+
+Web 面板为只读(概览统计 / 记忆浏览 / 召回测试);写入统一走 MCP 工具
+(`memory_recall` / `memory_write` / `memory_init_project` / `memory_stats`)。
+详见 [Server 层设计](docs/design/modules/13-server-layer.md)。
 
 ## 设计文档
 
 - [架构整合](docs/design/agent-memory-design.md) — 主架构 spec/contract
-- [模块总览](docs/design/modules/00-overview.md) — 12 个模块文档导航
+- [模块总览](docs/design/modules/00-overview.md) — 13 个模块文档导航
 - [Embedding 选型](docs/analyse/embedding-layer.md) — 技术栈选型论证
 
 ## 阶段路线图

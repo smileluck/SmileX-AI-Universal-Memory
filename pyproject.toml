@@ -45,13 +45,23 @@ Repository = "https://github.com/smileluck/SmileX-AI-Universal-Memory"
 embedding = [
     "sentence-transformers>=3.0",
 ]
+# 服务化: MCP server + Web 面板(纯嵌入式库不需要)
+server = [
+    "mcp>=1.9",
+    "fastapi>=0.115",
+    "uvicorn>=0.32",
+]
 dev = [
     "pytest>=8.3",
     "pytest-asyncio>=0.24",
     "pytest-cov>=5.0",
     "ruff>=0.7",
     "mypy>=1.13",
+    "httpx>=0.28",
 ]
+
+[project.scripts]
+smilex-memory = "smilex.cli:main"
 
 [build-system]
 requires = ["hatchling"]

@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SmileX Memory 面板</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <h1>SmileX Memory</h1>
+    <nav>
+      <button class="tab active" data-tab="overview">概览</button>
+      <button class="tab" data-tab="browse">记忆浏览</button>
+      <button class="tab" data-tab="recall">召回测试</button>
+    </nav>
+  </header>
+
+  <main>
+    <section id="tab-overview" class="panel active">
+      <h2>统计概览</h2>
+      <div id="stats-cards" class="cards">加载中…</div>
+      <h2>调度任务</h2>
+      <table id="tasks-table">
+        <thead><tr><th>任务</th><th>进度</th><th>步数</th><th>更新时间</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </section>
+
+    <section id="tab-browse" class="panel">
+      <form id="browse-form">
+        <input name="q" placeholder="关键词(内容/名称/谓词)">
+        <select name="layer">
+          <option value="">全部层</option>
+          <option value="L0">L0 工作记忆</option>
+          <option value="L1">L1 短时</option>
+          <option value="L2">L2 长时</option>
+          <option value="L3">L3 语义社区</option>
+        </select>
+        <input name="scope" placeholder="scope(如 project:demo,可空)">
+        <button type="submit">搜索</button>
+      </form>
+      <table id="memories-table">
+        <thead><tr><th>类型</th><th>内容</th><th>scope</th><th>层</th><th>重要性</th><th>更新时间</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </section>
+
+    <section id="tab-recall" class="panel">
+      <form id="recall-form">
+        <input name="query" placeholder="输入查询,测试召回效果" required>
+        <input name="top_k" type="number" value="10" min="1" max="50" title="top_k">
+        <button type="submit">召回</button>
+      </form>
+      <div id="recall-meta"></div>
+      <pre id="recall-context"></pre>
+      <table id="recall-sources">
+        <thead><tr><th>memory_id</th><th>层</th><th>score</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </section>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
