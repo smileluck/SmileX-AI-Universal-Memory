@@ -1,0 +1,2 @@
+# 脚本行尾: bash 在 Linux/macOS 上不接受 CRLF
+*.sh text eol=lf
