@@ -2,7 +2,7 @@
 
 Per module doc 02 §6 Schema 版本化机制:
 - PRAGMA user_version 存储当前 schema 版本
-- migrations/001_*.sql ~ 010_*.sql 顺序应用
+- migrations/001_*.sql ~ 012_*.sql 顺序应用
 - idempotent(每次启动只应用未应用的版本)
 """
 
@@ -12,7 +12,7 @@ import sqlite3
 from pathlib import Path
 
 # Schema 版本号(每次新增 .sql 文件或修改结构时 +1)
-SCHEMA_VERSION = 11
+SCHEMA_VERSION = 12
 
 # DDL 文件清单(按版本号顺序)
 MIGRATIONS: tuple[tuple[int, str], ...] = (
@@ -27,6 +27,7 @@ MIGRATIONS: tuple[tuple[int, str], ...] = (
     (9, "009_memory_l0_snapshot.sql"),
     (10, "010_virtual_tables.sql"),
     (11, "011_archive_and_predicate_dict.sql"),
+    (12, "012_perf_indexes.sql"),
 )
 
 

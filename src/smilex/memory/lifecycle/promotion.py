@@ -18,6 +18,7 @@ Per 主文档 §7.3 记忆流转 + 模块文档 03 §3.3(L0 溢出策略):
 
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import TYPE_CHECKING
 
@@ -126,8 +127,29 @@ class PromotionManager:
         memory = self._l0.get(session_id, memory_id)
         if memory is None:
             return False
+        return await self._promote_memory(
+            conn, session_id, memory, scope_id=scope_id
+        )
+
+    async def _promote_memory(
+        self,
+        conn: aiosqlite.Connection,
+        session_id: str,
+        memory: FuzzyMemory,
+        *,
+        scope_id: str | None = None,
+        vector=None,
+    ) -> bool:
+        """晋升单条记忆(promote / check_session 共用).
+
+        vector 为预计算 embedding(M6 批量晋升时由 embed_batch 一次算出),
+        None 时经 VectorStore.add_text 单独编码。
+
+        Raises:
+            ValueError: content 为空(无法检索的记忆不晋升)
+        """
         if memory.content is None:
-            raise ValueError(f"记忆 {memory_id} content 为空,无法晋升到 L1")
+            raise ValueError(f"记忆 {memory.id} content 为空,无法晋升到 L1")
 
         scope_str = scope_path(memory.scope, scope_id)
         memory.layer = MemoryLayer.L1_SHORT
@@ -152,11 +174,16 @@ class PromotionManager:
             ),
         )
         if self._vector_store is not None:
-            await self._vector_store.add_text(
-                conn, memory.content, fragment_id=memory.id
-            )
+            if vector is None:
+                await self._vector_store.add_text(
+                    conn, memory.content, fragment_id=memory.id
+                )
+            else:
+                await self._vector_store.add_vector(
+                    conn, vector, fragment_id=memory.id
+                )
         # 存储写入成功后才从 L0 移除
-        self._l0.remove(session_id, memory_id)
+        self._l0.remove(session_id, memory.id)
         return True
 
     async def check_session(
@@ -166,12 +193,31 @@ class PromotionManager:
         *,
         scope_id: str | None = None,
     ) -> list[str]:
-        """扫描会话中所有超过阈值的记忆并晋升,返回晋升的 memory_id 列表."""
+        """扫描会话中所有超过阈值的记忆并晋升,返回晋升的 memory_id 列表.
+
+        多条待晋升时经 embed_batch 一次批量编码(M6),代替逐条 embed;
+        编码卸载到线程执行(H3),不阻塞事件循环。
+        """
+        candidates = [
+            m
+            for m in self._l0.list(session_id)
+            if m.content is not None and self.needs_promotion(m)
+        ]
+        if not candidates:
+            return []
+        vectors: list | None = None
+        if self._vector_store is not None:
+            vectors = await asyncio.to_thread(
+                self._vector_store.embedder.embed_batch,
+                [m.content or "" for m in candidates],
+            )
         promoted: list[str] = []
-        for memory in self._l0.list(session_id):
-            if memory.content is None or not self.needs_promotion(memory):
-                continue
-            if await self.promote(conn, session_id, memory.id, scope_id=scope_id):
+        for memory, vector in zip(
+            candidates, vectors or [None] * len(candidates), strict=True
+        ):
+            if await self._promote_memory(
+                conn, session_id, memory, scope_id=scope_id, vector=vector
+            ):
                 promoted.append(memory.id)
         return promoted
 

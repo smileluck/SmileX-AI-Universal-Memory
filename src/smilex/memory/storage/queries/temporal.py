@@ -67,6 +67,7 @@ async def query_in_range(
     *,
     table: str = "triples",
     scope_filter: ScopeFilter | None = None,
+    limit: int | None = None,
 ) -> list[aiosqlite.Row]:
     """时间范围查询 — 找出与 [start, end] 有重叠的记录.
 
@@ -80,6 +81,7 @@ async def query_in_range(
         end: 范围结束(含)
         table: 查询表,"triples" 或 "entities"
         scope_filter: 作用域过滤
+        limit: 返回条数上限(M3: 下推 SQL LIMIT,避免大范围全量拉回后 Python 切片)
 
     Returns:
         匹配的行列表(按 valid_from 升序)
@@ -90,7 +92,7 @@ async def query_in_range(
     start_str = to_iso(start)
     end_str = to_iso(end)
     where_clauses = ["valid_from <= ?", "(valid_to IS NULL OR valid_to >= ?)"]
-    params: list[str] = [end_str, start_str]
+    params: list = [end_str, start_str]
 
     scope_clause, scope_params = build_scope_clause(scope_filter)
     if scope_clause:
@@ -102,6 +104,9 @@ async def query_in_range(
         + " AND ".join(where_clauses)
         + " ORDER BY valid_from"
     )
+    if limit is not None:
+        sql += " LIMIT ?"
+        params.append(limit)
 
     cursor = await conn.execute(sql, params)
     return list(await cursor.fetchall())

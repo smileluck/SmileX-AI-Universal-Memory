@@ -186,17 +186,50 @@ class ContradictionDetector:
     # ==================== 按需扫描 ====================
 
     async def scan(self, scope: str) -> ContradictionReport:
-        """扫描指定 scope 全部三元组,输出矛盾报告(规则版 detect_async)."""
+        """扫描指定 scope 全部三元组,输出矛盾报告(规则版 detect_async).
+
+        M11: 不再全量载入 —— 先在 SQL 内预过滤,只取有可能冲突的行:
+        - 组内两两检测只需成员数 >= 2 的 (subject_id, predicate) 组
+        - 反向因果只需现行 causal 谓词行
+        scanned_triples 报告语义不变(单独 COUNT 统计)。
+        """
+        conn = self._storage.conn
         start = time.monotonic()
-        cursor = await self._storage.conn.execute(
-            "SELECT id, subject_id, predicate, object_id, object_value, "
-            "relation_type, valid_from, valid_to FROM triples WHERE scope = ?",
-            [scope],
+        cursor = await conn.execute(
+            "SELECT COUNT(*) AS c FROM triples WHERE scope = ?", [scope]
         )
-        rows = [self._to_row(r) for r in await cursor.fetchall()]
-        report = ContradictionReport(scope=scope, scanned_triples=len(rows))
+        report = ContradictionReport(
+            scope=scope, scanned_triples=int((await cursor.fetchone())["c"])
+        )
+
+        columns = (
+            "id, subject_id, predicate, object_id, object_value, "
+            "relation_type, valid_from, valid_to"
+        )
 
         # 1. 同 (subject, predicate) 组内两两检测(时态/数量/取值/同键因果)
+        cursor = await conn.execute(
+            "SELECT subject_id, predicate FROM triples WHERE scope = ? "
+            "GROUP BY subject_id, predicate HAVING COUNT(*) >= 2",
+            [scope],
+        )
+        group_keys = [
+            (str(r["subject_id"]), str(r["predicate"]))
+            for r in await cursor.fetchall()
+        ]
+        rows: list[_TripleRow] = []
+        # 分批 row-value IN,避免超出 SQLite 变量上限
+        for i in range(0, len(group_keys), 500):
+            chunk = group_keys[i : i + 500]
+            ph = ",".join("(?,?)" for _ in chunk)
+            flat = [v for pair in chunk for v in pair]
+            cursor = await conn.execute(
+                f"SELECT {columns} FROM triples "
+                f"WHERE scope = ? AND (subject_id, predicate) IN ({ph})",
+                [scope, *flat],
+            )
+            rows.extend(self._to_row(r) for r in await cursor.fetchall())
+
         groups: dict[tuple[str, str], list[_TripleRow]] = {}
         for row in rows:
             groups.setdefault((row.subject_id, row.predicate), []).append(row)
@@ -209,13 +242,18 @@ class ContradictionDetector:
                         report.contradictions.append(c)
 
         # 2. 反向因果: 同谓词 (A→B) 与 (B→A) 并存
+        causal_ph = ",".join("?" for _ in CAUSE_PREDICATES)
+        cursor = await conn.execute(
+            f"SELECT {columns} FROM triples WHERE scope = ? "
+            f"AND relation_type = 'causal' AND valid_to IS NULL "
+            f"AND predicate IN ({causal_ph})",
+            [scope, *sorted(CAUSE_PREDICATES)],
+        )
+        causal_rows = [self._to_row(r) for r in await cursor.fetchall()]
+
         forward: dict[tuple[str, str, str], _TripleRow] = {}
         seen_pairs: set[frozenset[str]] = set()
-        for row in rows:
-            if row.relation_type != "causal" or row.predicate not in CAUSE_PREDICATES:
-                continue
-            if not row.current:
-                continue
+        for row in causal_rows:
             # object_value 视图此时承载 object_id(反向因果需要实体端点)
             key = (row.predicate, row.subject_id, row.object_value)
             forward[key] = row

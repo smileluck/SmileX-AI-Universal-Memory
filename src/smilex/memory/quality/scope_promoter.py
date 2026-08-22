@@ -278,39 +278,54 @@ class ScopePromoter:
             if isinstance(ctx.cursor, str):
                 cursor = ctx.cursor
         total = len(patterns)
+        # M10: 提升循环共享事务 + 实体缓存 —— 不再每模式 commit/检查点,
+        # 每 50 个模式落一次检查点(落库本身即 commit),循环结束统一收尾
+        entity_cache: dict[str, str | None] = {}
         for i, pattern in enumerate(patterns):
             if pattern.key <= cursor:
                 continue
             if pattern.key in existing_keys:
                 report.skipped_existing += 1
             else:
-                await self.promote_to_global(pattern)
+                await self.promote_to_global(
+                    pattern, commit=False, entity_cache=entity_cache
+                )
                 existing_keys.add(pattern.key)  # 同事务内后续模式可见
                 report.promoted.append(pattern)
             step += 1
-            if ctx is not None:
+            if ctx is not None and ((i + 1) % 50 == 0 or i + 1 == total):
                 await ctx.checkpoint(
                     step=step,
                     progress=(i + 1) / total if total else 1.0,
                     state={"stats": report.to_dict()},
                     cursor=pattern.key,
                 )
+        await self._storage.conn.commit()
         report.elapsed_ms = int((time.monotonic() - start) * 1000)
         return report, step
 
-    async def promote_to_global(self, pattern: CrossProjectPattern) -> str:
+    async def promote_to_global(
+        self,
+        pattern: CrossProjectPattern,
+        *,
+        commit: bool = True,
+        entity_cache: dict[str, str | None] | None = None,
+    ) -> str:
         """把一个共现模式复制到 global scope,返回新三元组 id.
 
         - 主体/客体实体在 global 按 entity_id 去重补建(source_closet 回指源实体)
         - 提升三元组 source_closet 回指代表性源三元组(confidence 最高,
           并列取 id 最小,确定性)
         - 调用方负责幂等(模式键查重见 _detect_and_promote)
+        - commit=False(M10 批量提升): 由调用方统一收尾事务
+        - entity_cache(M10): 跨模式共享 _ensure_global_entity 结果,
+          避免相同实体(如 tech:redis)跨模式重复查询
         """
         representative = await self._representative_source(pattern)
-        subject_id = await self._ensure_global_entity(pattern.subject_key)
+        subject_id = await self._ensure_global_entity(pattern.subject_key, entity_cache)
         object_id = None
         if pattern.object_value is None:
-            object_id = await self._ensure_global_entity(pattern.object_key)
+            object_id = await self._ensure_global_entity(pattern.object_key, entity_cache)
 
         triple_id = generate_id()
         now = to_iso(now_utc())
@@ -333,7 +348,8 @@ class ScopePromoter:
                 representative["id"] if representative else None,
             ),
         )
-        await self._storage.conn.commit()
+        if commit:
+            await self._storage.conn.commit()
         return triple_id
 
     async def _representative_source(self, pattern: CrossProjectPattern) -> dict | None:
@@ -347,12 +363,19 @@ class ScopePromoter:
         row = await cursor.fetchone()
         return dict(row) if row else None
 
-    async def _ensure_global_entity(self, entity_key: str) -> str | None:
+    async def _ensure_global_entity(
+        self,
+        entity_key: str,
+        cache: dict[str, str | None] | None = None,
+    ) -> str | None:
         """确保 global scope 存在 entity_id = entity_key 的实体(按 entity_id 去重).
 
         从任一 project 源实体复制(名称/类型/归一化 ID),新 ULID,
         source_closet 回指源实体 id;无源实体行(裸 subject_id)时返回 None.
+        cache(M10): 跨模式复用查询/创建结果(key → global 实体 id 或 None)。
         """
+        if cache is not None and entity_key in cache:
+            return cache[entity_key]
         conn = self._storage.conn
         cursor = await conn.execute(
             "SELECT id FROM entities WHERE scope = 'global' AND entity_id = ?",
@@ -360,7 +383,10 @@ class ScopePromoter:
         )
         row = await cursor.fetchone()
         if row is not None:
-            return str(row["id"])
+            result: str | None = str(row["id"])
+            if cache is not None:
+                cache[entity_key] = result
+            return result
         cursor = await conn.execute(
             "SELECT id, entity_type, name, valid_from FROM entities "
             "WHERE entity_id = ? AND scope LIKE 'project:%' ORDER BY id LIMIT 1",
@@ -368,6 +394,8 @@ class ScopePromoter:
         )
         source = await cursor.fetchone()
         if source is None:
+            if cache is not None:
+                cache[entity_key] = None
             return None
         new_id = generate_id()
         await conn.execute(
@@ -383,6 +411,8 @@ class ScopePromoter:
                 source["id"],
             ),
         )
+        if cache is not None:
+            cache[entity_key] = new_id
         return new_id
 
     async def _global_pattern_keys(self) -> set[str]:
@@ -405,6 +435,34 @@ class ScopePromoter:
             )
             keys.add(f"{subject_key}|{r['predicate']}|{object_key}")
         return keys
+
+    async def _global_pattern_key_exists(
+        self, subject_key: str, predicate: str, object_key: str
+    ) -> bool:
+        """global 是否已存在同键三元组(与检测同一键规则).
+
+        M10: 按 predicate 过滤后逐行比对,代替 _global_pattern_keys() 的全表
+        载入(manual_promote 只需判断单键存在)。
+        """
+        cursor = await self._storage.conn.execute(
+            "SELECT t.subject_id, t.object_id, t.object_value, "
+            "s.entity_id AS subject_entity_id, o.entity_id AS object_entity_id "
+            "FROM triples t "
+            "LEFT JOIN entities s ON s.id = t.subject_id "
+            "LEFT JOIN entities o ON o.id = t.object_id "
+            "WHERE t.scope = 'global' AND t.predicate = ?",
+            [predicate],
+        )
+        for r in await cursor.fetchall():
+            sk = str(r["subject_entity_id"] or r["subject_id"])
+            ok = (
+                str(r["object_entity_id"] or r["object_id"])
+                if r["object_id"]
+                else f"value:{normalize_value(str(r['object_value']))}"
+            )
+            if sk == subject_key and ok == object_key:
+                return True
+        return False
 
     # ==================== 手动提升 ====================
 
@@ -432,8 +490,9 @@ class ScopePromoter:
             if r["object_id"]
             else f"value:{normalize_value(str(r['object_value']))}"
         )
-        key = f"{subject_key}|{r['predicate']}|{object_key}"
-        if key in await self._global_pattern_keys():
+        if await self._global_pattern_key_exists(
+            subject_key, str(r["predicate"]), object_key
+        ):
             return None
         pattern = CrossProjectPattern(
             subject_key=subject_key,

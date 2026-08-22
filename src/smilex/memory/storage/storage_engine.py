@@ -1,7 +1,7 @@
 """StorageEngine — Layer 1 对外契约(§6.6)的面向对象封装.
 
 把 SQLiteEngine + queries 模块 + Layer 0 models 组合成统一 API:
-- 写入: write_entity / write_triple / write_location
+- 写入: write_entity / write_triple / write_location(+ 批量 write_entities / write_triples,H1)
 - 读取: get_entity / get_triple
 - 检索: query_at_time / find_path / hybrid_search / ...(委托 queries 模块)
 - 当前状态: get_current_state(读取 project_current_state 触发器维护的汇总)
@@ -18,11 +18,28 @@ from pathlib import Path
 
 import aiosqlite
 import numpy as np
+from sqlite_vec import serialize_float32
 
 from ...utils.timeutil import to_iso
 from ..models import CertaintyLevel, Entity, MemoryScope, Triple
 from . import queries
 from .sqlite_engine import SQLiteEngine
+
+
+def _serialize_embedding(emb: np.ndarray) -> bytes:
+    """embedding → float32 BLOB(M5,sqlite_vec.serialize_float32,与 vector_store 一致)."""
+    return serialize_float32(np.asarray(emb, dtype=np.float32).tolist())
+
+
+def _deserialize_embedding(value) -> np.ndarray:
+    """embedding 列 → np.float32 数组,按 SQLite 动态类型分派(M5).
+
+    - bytes: 新格式 float32 BLOB(serialize_float32)
+    - str: 存量 JSON list(历史数据兼容路径)
+    """
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return np.frombuffer(bytes(value), dtype=np.float32).copy()
+    return np.array(json.loads(value), dtype=np.float32)
 
 
 def scope_path(scope: MemoryScope, scope_id: str | None = None) -> str:
@@ -83,6 +100,8 @@ class StorageEngine:
         load_vec: bool = True,
     ) -> None:
         self._engine = SQLiteEngine(db_path, pragmas=pragmas, load_vec=load_vec)
+        # predicate 字典编码进程内缓存(H1): 绑定本实例的 DB,见 predicate_codec
+        self._predicate_cache: dict[str, int] = {}
 
     async def initialize(self) -> None:
         await self._engine.initialize()
@@ -100,6 +119,45 @@ class StorageEngine:
         return self._engine.is_initialized
 
     # ==================== 写入 ====================
+
+    @staticmethod
+    def _entity_params(entity: Entity, scope_str: str) -> tuple:
+        """Entity → entities 表 INSERT 参数行(embedding 存 float32 BLOB,M5)."""
+        return (
+            entity.id,
+            entity.entity_id,
+            entity.entity_type,
+            entity.name,
+            scope_str,
+            to_iso(entity.valid_from),
+            to_iso(entity.valid_to) if entity.valid_to else None,
+            _serialize_embedding(entity.embedding)
+            if entity.embedding is not None
+            else None,
+            entity.source_closet,
+        )
+
+    @staticmethod
+    def _triple_params(triple: Triple, scope_str: str, predicate_code: int) -> tuple:
+        """Triple → triples 表 INSERT 参数行."""
+        return (
+            triple.id,
+            triple.triple_id,
+            triple.subject_id,
+            triple.predicate,
+            predicate_code,
+            triple.object_id,
+            triple.object_value,
+            scope_str,
+            to_iso(triple.valid_from),
+            to_iso(triple.valid_to) if triple.valid_to else None,
+            triple.predecessor_id,
+            triple.causal_level,
+            triple.confidence,
+            str(triple.certainty),
+            triple.relation_type,
+            triple.source_closet,
+        )
 
     async def write_entity(
         self,
@@ -119,21 +177,33 @@ class StorageEngine:
                 "INSERT INTO entities(id, entity_id, entity_type, name, scope, "
                 "valid_from, valid_to, embedding, source_closet) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (
-                    entity.id,
-                    entity.entity_id,
-                    entity.entity_type,
-                    entity.name,
-                    scope_str,
-                    to_iso(entity.valid_from),
-                    to_iso(entity.valid_to) if entity.valid_to else None,
-                    json.dumps(entity.embedding.tolist())
-                    if entity.embedding is not None
-                    else None,
-                    entity.source_closet,
-                ),
+                self._entity_params(entity, scope_str),
             )
         return entity.id
+
+    async def write_entities(
+        self,
+        entities: list[Entity],
+        *,
+        scope_id: str | None = None,
+    ) -> list[str]:
+        """批量写入 Entity(H1): 单事务 + executemany,返回 id 列表.
+
+        与 write_entity 语义一致,但 N 条只刷一次 WAL。
+        """
+        if not entities:
+            return []
+        async with self._engine.transaction() as conn:
+            await conn.executemany(
+                "INSERT INTO entities(id, entity_id, entity_type, name, scope, "
+                "valid_from, valid_to, embedding, source_closet) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                [
+                    self._entity_params(e, scope_path(e.scope, scope_id))
+                    for e in entities
+                ],
+            )
+        return [e.id for e in entities]
 
     async def write_triple(
         self,
@@ -149,33 +219,52 @@ class StorageEngine:
 
         scope_str = scope_path(triple.scope, scope_id)
         async with self._engine.transaction() as conn:
-            predicate_code = await encode_predicate(conn, triple.predicate)
+            predicate_code = await encode_predicate(
+                conn, triple.predicate, cache=self._predicate_cache
+            )
             await conn.execute(
                 "INSERT INTO triples(id, triple_id, subject_id, predicate, "
                 "predicate_code, object_id, object_value, scope, valid_from, valid_to, "
                 "predecessor_id, causal_level, confidence, certainty, "
                 "relation_type, source_closet) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (
-                    triple.id,
-                    triple.triple_id,
-                    triple.subject_id,
-                    triple.predicate,
-                    predicate_code,
-                    triple.object_id,
-                    triple.object_value,
-                    scope_str,
-                    to_iso(triple.valid_from),
-                    to_iso(triple.valid_to) if triple.valid_to else None,
-                    triple.predecessor_id,
-                    triple.causal_level,
-                    triple.confidence,
-                    str(triple.certainty),
-                    triple.relation_type,
-                    triple.source_closet,
-                ),
+                self._triple_params(triple, scope_str, predicate_code),
             )
         return triple.id
+
+    async def write_triples(
+        self,
+        triples: list[Triple],
+        *,
+        scope_id: str | None = None,
+    ) -> list[str]:
+        """批量写入 Triple(H1): 单事务 + executemany,返回 id 列表.
+
+        与 write_triple 语义一致(含 project_current_state 触发器),但 N 条
+        只刷一次 WAL;predicate 编码走实例级缓存,miss 时才查库。
+        """
+        from .predicate_codec import encode_predicate
+
+        if not triples:
+            return []
+        async with self._engine.transaction() as conn:
+            rows = []
+            for t in triples:
+                predicate_code = await encode_predicate(
+                    conn, t.predicate, cache=self._predicate_cache
+                )
+                rows.append(
+                    self._triple_params(t, scope_path(t.scope, scope_id), predicate_code)
+                )
+            await conn.executemany(
+                "INSERT INTO triples(id, triple_id, subject_id, predicate, "
+                "predicate_code, object_id, object_value, scope, valid_from, valid_to, "
+                "predecessor_id, causal_level, confidence, certainty, "
+                "relation_type, source_closet) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                rows,
+            )
+        return [t.id for t in triples]
 
     async def write_location(
         self,
@@ -235,7 +324,7 @@ class StorageEngine:
         scope_enum, _ = parse_scope_path(row["scope"])
         emb = None
         if row["embedding"]:
-            emb = np.array(json.loads(row["embedding"]), dtype=np.float32)
+            emb = _deserialize_embedding(row["embedding"])
         return Entity(
             id=row["id"],
             entity_id=row["entity_id"],

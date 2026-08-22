@@ -225,27 +225,29 @@ class ConflictDetector:
                 conflicting_memory_id=predecessor_id,
                 message=f"因果自环: {triple_id} 的前驱是自身",
             )
-        visited: set[str] = set()
-        current: str | None = predecessor_id
-        depth = 0
-        while current is not None and depth <= max_depth and current not in visited:
-            if current == triple_id:
-                return Conflict(
-                    conflict_type=ConflictType.CAUSAL_CYCLE,
-                    resource_id=triple_id,
-                    chain_id=chain_id,
-                    conflicting_memory_id=current,
-                    message=(
-                        f"因果环: {triple_id} 经前驱链可达其前驱 {predecessor_id}"
-                    ),
-                )
-            visited.add(current)
-            cursor = await conn.execute(
-                "SELECT predecessor_id FROM triples WHERE id = ?", [current]
+        # 单条 WITH RECURSIVE CTE 沿前驱链回溯(H4),代替逐跳 SELECT 循环
+        # (最深 max_depth 次串行往返)。深度上限保证有限终止。
+        cursor = await conn.execute(
+            "WITH RECURSIVE chain(id, depth) AS ("
+            "    SELECT ?, 0"
+            "    UNION ALL"
+            "    SELECT t.predecessor_id, c.depth + 1"
+            "    FROM chain c JOIN triples t ON t.id = c.id"
+            "    WHERE t.predecessor_id IS NOT NULL AND c.depth < ?"
+            ") "
+            "SELECT 1 FROM chain WHERE id = ? LIMIT 1",
+            [predecessor_id, max_depth, triple_id],
+        )
+        if await cursor.fetchone() is not None:
+            return Conflict(
+                conflict_type=ConflictType.CAUSAL_CYCLE,
+                resource_id=triple_id,
+                chain_id=chain_id,
+                conflicting_memory_id=triple_id,
+                message=(
+                    f"因果环: {triple_id} 经前驱链可达其前驱 {predecessor_id}"
+                ),
             )
-            row = await cursor.fetchone()
-            current = row["predecessor_id"] if row else None
-            depth += 1
         return None
 
     async def check_causal_contradiction(

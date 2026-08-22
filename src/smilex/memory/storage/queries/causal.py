@@ -8,9 +8,9 @@ Per main doc §6.5 检索能力矩阵:
 - 向后追溯(backward): 从某 triple 沿 predecessor_id 走到根因
 - 向前追溯(forward):  从某 triple 找所有后继(影响分析)
 
-实现方式: SQL `WITH RECURSIVE` CTE.
-- backward: 沿 predecessor_id 链向前驱走
-- forward:  找所有 predecessor_id 指向当前的 triples
+实现方式:
+- backward: 单条 SQL `WITH RECURSIVE` CTE 沿 predecessor_id 链走到根因(H4)
+- forward:  按层批量 `IN (...)` 找所有 predecessor_id 指向当前层的 triples
 
 scope 过滤策略:
 - 起点检查(在 CTE 之前):起点 triple 必须在 scope 内,否则返回空
@@ -47,25 +47,30 @@ async def _trace_backward(
     triple_id: str,
     max_depth: int,
 ) -> list[dict]:
-    """向后追溯: triple → predecessor → predecessor → ... → root."""
+    """向后追溯: triple → predecessor → predecessor → ... → root.
+
+    单条 WITH RECURSIVE CTE 取回整链(H4),代替逐跳 SELECT 循环
+    (max_depth=20 时最多 21 次串行往返)。深度上限保证有限终止;
+    异常数据构成前驱环时按首次到达去重(与原 visited 语义一致)。
+    """
+    cursor = await conn.execute(
+        "WITH RECURSIVE chain(id, predecessor_id, depth) AS ("
+        "    SELECT id, predecessor_id, 0 FROM triples WHERE id = ?"
+        "    UNION ALL"
+        "    SELECT t.id, t.predecessor_id, c.depth + 1"
+        "    FROM chain c JOIN triples t ON t.id = c.predecessor_id"
+        "    WHERE c.depth < ?"
+        ") "
+        "SELECT id, depth FROM chain ORDER BY depth",
+        [triple_id, max_depth],
+    )
     rows: list[dict] = []
-    current_id: str | None = triple_id
-    depth = 0
-    visited: set[str] = set()
-
-    while current_id is not None and depth <= max_depth and current_id not in visited:
-        visited.add(current_id)
-        cursor = await conn.execute(
-            "SELECT id, predecessor_id FROM triples WHERE id = ?",
-            [current_id],
-        )
-        row = await cursor.fetchone()
-        if row is None:
-            break
-        rows.append({"id": row["id"], "depth": depth})
-        current_id = row["predecessor_id"]
-        depth += 1
-
+    seen: set[str] = set()
+    for row in await cursor.fetchall():
+        if row["id"] in seen:
+            continue
+        seen.add(row["id"])
+        rows.append({"id": row["id"], "depth": row["depth"]})
     return rows
 
 

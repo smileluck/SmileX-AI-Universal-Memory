@@ -20,12 +20,22 @@ from __future__ import annotations
 import aiosqlite
 
 
-async def encode_predicate(conn: aiosqlite.Connection, predicate: str) -> int:
+async def encode_predicate(
+    conn: aiosqlite.Connection,
+    predicate: str,
+    *,
+    cache: dict[str, int] | None = None,
+) -> int:
     """取 predicate 的字典编码,不存在则插入新编码(get-or-create).
 
     Args:
         conn: aiosqlite 连接(事务由调用方管理,本函数不主动 commit)
         predicate: 谓词字符串(非空)
+        cache: 进程内谓词缓存(predicate → code),命中时跳过 SQL(H1 写路径批量化).
+            一致性说明: code 单调递增且不可变,缓存映射永久有效、无需失效;
+            缓存必须绑定单一数据库(StorageEngine 每实例一份)——不同 DB 的
+            code 分配顺序可能不同,跨库共用会错码。多进程/多连接各持缓存也安全:
+            miss 路径 INSERT OR IGNORE 幂等,SELECT 拿到的始终是权威 code。
 
     Returns:
         predicate_dict.code(单调递增 int)
@@ -35,6 +45,8 @@ async def encode_predicate(conn: aiosqlite.Connection, predicate: str) -> int:
     """
     if not predicate:
         raise ValueError("predicate 不能为空")
+    if cache is not None and predicate in cache:
+        return cache[predicate]
     await conn.execute(
         "INSERT OR IGNORE INTO predicate_dict(predicate) VALUES (?)",
         [predicate],
@@ -46,7 +58,10 @@ async def encode_predicate(conn: aiosqlite.Connection, predicate: str) -> int:
     row = await cursor.fetchone()
     if row is None:  # 理论上不可达(INSERT OR IGNORE 已保证存在)
         raise RuntimeError(f"predicate_dict 编码失败: {predicate!r}")
-    return int(row["code"])
+    code = int(row["code"])
+    if cache is not None:
+        cache[predicate] = code
+    return code
 
 
 async def decode_predicate(conn: aiosqlite.Connection, code: int) -> str | None:

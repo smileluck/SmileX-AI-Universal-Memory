@@ -197,6 +197,8 @@ class BulkImporter:
                 result.source_count += 1
             except Exception as exc:  # 单文件失败不中断整体导入
                 result.errors.append(f"{rel}: {exc}")
+        # H6: 循环内不逐条 commit,此处统一提交
+        await self._bootstrap._storage.conn.commit()
         result.entity_count, result.triple_count = await self._bootstrap.apply_seeds(
             scope, seeds
         )
@@ -226,6 +228,8 @@ class BulkImporter:
                 result.source_count += 1
             except Exception as exc:
                 result.errors.append(f"text[{result.source_count}]: {exc}")
+        # H6: 循环内不逐条 commit,此处统一提交
+        await self._bootstrap._storage.conn.commit()
         result.entity_count, result.triple_count = await self._bootstrap.apply_seeds(
             scope, seeds
         )
@@ -264,11 +268,19 @@ class BulkImporter:
                         break
 
         pending = commits[start_index:]
+        # 作者名 → 实体 id 缓存(H6): 同一作者在上万条提交中反复出现,
+        # 缓存跨批持有,避免每提交一次 (scope, name) 查询
+        author_cache: dict[str, list[str]] = {}
+        # apply_seeds 已存在键缓存(H7): 跨批持有,避免每批全量重载 scope
+        seeds_known: dict = {}
         try:
             for offset in range(0, len(pending), self._batch_size):
                 batch = pending[offset : offset + self._batch_size]
                 try:
-                    await self._import_git_batch(scope, source, repo_name, batch, result)
+                    await self._import_git_batch(
+                        scope, source, repo_name, batch, result, author_cache,
+                        seeds_known,
+                    )
                 except Exception as exc:  # 单批失败记录后继续
                     result.errors.append(f"batch@{offset}: {exc}")
                 await store.save(
@@ -291,6 +303,8 @@ class BulkImporter:
         repo_name: str,
         batch: list[_GitCommit],
         result: ImportResult,
+        author_cache: dict[str, list[str]] | None = None,
+        seeds_known: dict | None = None,
     ) -> None:
         """单批提交: 作者/文件种子幂等写入 + 每提交一条时序记忆."""
         seeds = ExtractionResult()
@@ -320,7 +334,7 @@ class BulkImporter:
                     )
                 )
         result.entity_count, result.triple_count = await self._bootstrap.apply_seeds(
-            scope, seeds
+            scope, seeds, known=seeds_known
         )
 
         conn = self._bootstrap._storage.conn
@@ -329,7 +343,13 @@ class BulkImporter:
             content = f"[{commit.hash[:8]}] {commit.message}"
             if files_note:
                 content += f"\nfiles: {files_note}"
-            author_ids = await self._entity_ids_by_name(scope, commit.author_name)
+            author_name = commit.author_name
+            if author_cache is not None and author_name in author_cache:
+                author_ids = author_cache[author_name]
+            else:
+                author_ids = await self._entity_ids_by_name(scope, author_name)
+                if author_cache is not None:
+                    author_cache[author_name] = author_ids
             written = await self._write_fragment(
                 scope,
                 fragment_id=f"git:{repo_name}:{commit.hash}",
@@ -396,7 +416,9 @@ class BulkImporter:
     ) -> bool:
         """写一条 L1 时序记忆(按 (scope, fragment_id) 幂等),返回是否新写入.
 
-        vector_store 可用时同步写内容向量(L1 KNN 召回通道).
+        vector_store 可用时同步写内容向量(L1 KNN 召回通道)。
+        事务约定(H6): 不在此处 commit —— 逐条 commit 会把每次导入放大成
+        N 次 WAL 刷盘;由调用方在循环结束后统一 commit。
         """
         storage = self._bootstrap._storage
         conn = storage.conn
@@ -429,7 +451,6 @@ class BulkImporter:
             await self._bootstrap._vector_store.add_text(
                 conn, content, fragment_id=row_id
             )
-        await conn.commit()
         return True
 
 

@@ -12,7 +12,7 @@ LLM 提取默认规则兜底(EXECUTION_PLAN_GAPS §3.6),接口留 LLMProvider Pr
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from ....middlewares.dto import (
     PROJECT_TEMPLATES,
@@ -146,9 +146,19 @@ class ProjectBootstrap:
     # ==================== 种子持久化 ====================
 
     async def apply_seeds(
-        self, scope: str, result: ExtractionResult
+        self,
+        scope: str,
+        result: ExtractionResult,
+        *,
+        known: dict[str, Any] | None = None,
     ) -> tuple[int, int]:
         """把种子集写入指定 scope(幂等: 已存在的实体/三元组跳过).
+
+        Args:
+            known: 可选的跨调用已存在键缓存(H7),结构
+                {"name_to_id": dict[str, str], "seen": set[str], "triple_keys": set[tuple]}。
+                传入时跳过该 scope 的全量重载,由本函数增量更新 —— 批量导入每批
+                调用一次本方法,缓存由调用方持有可避免 O(批数 × scope 规模) 扫描。
 
         Returns:
             (实体总数, 三元组总数) — 该 scope 下当前总量(含已有)
@@ -158,16 +168,32 @@ class ProjectBootstrap:
             raise ValueError("冷启动种子只能写入 project/tenant scope")
 
         conn = self._storage.conn
-        # 已存在的实体: entity_id → (id, name)
-        cursor = await conn.execute(
-            "SELECT id, entity_id, name FROM entities WHERE scope = ?", [scope]
-        )
-        existing = {r["entity_id"]: (r["id"], r["name"]) for r in await cursor.fetchall()}
+        if known is None:
+            known = {}
+        if "name_to_id" not in known:
+            # 已存在的实体: entity_id → (id, name)
+            cursor = await conn.execute(
+                "SELECT id, entity_id, name FROM entities WHERE scope = ?", [scope]
+            )
+            existing = {r["entity_id"]: (r["id"], r["name"]) for r in await cursor.fetchall()}
+            known["name_to_id"] = {name: id_ for id_, name in existing.values()}
+            known["seen"] = set(existing)
+            cursor = await conn.execute(
+                "SELECT subject_id, predicate, object_id, object_value "
+                "FROM triples WHERE scope = ?",
+                [scope],
+            )
+            known["triple_keys"] = {
+                (r["subject_id"], r["predicate"], r["object_id"], r["object_value"])
+                for r in await cursor.fetchall()
+            }
+        name_to_id: dict[str, str] = known["name_to_id"]
+        seen: set[str] = known["seen"]
+        triple_keys: set[tuple] = known["triple_keys"]
 
-        # 1. 实体: 按 entity_id 去重(ExtractionResult.merge 已做,这里再兜底)
-        name_to_id: dict[str, str] = {name: id_ for id_, name in existing.values()}
+        # 1. 实体: 按 entity_id 去重(ExtractionResult.merge 已做,这里再兜底),
+        #    批量单事务写入(H7: 代替逐条 write_entity 独立事务)
         new_entities: list[Entity] = []
-        seen: set[str] = set(existing)
         for seed in result.entities:
             if seed.entity_id in seen:
                 continue
@@ -178,9 +204,9 @@ class ProjectBootstrap:
                 name=seed.name,
                 scope=scope_enum,
             )
-            await self._storage.write_entity(entity, scope_id=scope_id)
             name_to_id[seed.name] = entity.id
             new_entities.append(entity)
+        await self._storage.write_entities(new_entities, scope_id=scope_id)
 
         # 2. 向量(可选通道): 仅为新实体写名称向量
         if self._vector_store is not None and new_entities:
@@ -190,40 +216,34 @@ class ProjectBootstrap:
                 )
             await conn.commit()
 
-        # 3. 三元组: 解析名称引用 → ULID;缺失端点自动补 concept 实体
-        cursor = await conn.execute(
-            "SELECT subject_id, predicate, object_id, object_value "
-            "FROM triples WHERE scope = ?",
-            [scope],
-        )
-        existing_triples = {
-            (r["subject_id"], r["predicate"], r["object_id"], r["object_value"])
-            for r in await cursor.fetchall()
-        }
-        triple_keys: set[tuple] = set(existing_triples)
+        # 3. 三元组: 解析名称引用 → ULID;缺失端点自动补 concept 实体,
+        #    批量单事务写入(H7: 代替逐条 write_triple 独立事务)
+        new_triples: list[Triple] = []
         for seed in result.triples:
             subject_id = await self._resolve_entity(
-                scope_enum, scope_id, seed.subject, name_to_id
+                scope_enum, scope_id, seed.subject, name_to_id, seen
             )
             object_id = None
             if seed.object_name:
                 object_id = await self._resolve_entity(
-                    scope_enum, scope_id, seed.object_name, name_to_id
+                    scope_enum, scope_id, seed.object_name, name_to_id, seen
                 )
             key = (subject_id, seed.predicate, object_id, seed.object_value)
             if key in triple_keys:
                 continue
             triple_keys.add(key)
-            triple = Triple(
-                triple_id=f"{subject_id}|{seed.predicate}|{object_id or seed.object_value}",
-                subject_id=subject_id,
-                predicate=seed.predicate,
-                object_id=object_id,
-                object_value=seed.object_value,
-                scope=scope_enum,
-                relation_type=seed.relation_type,
+            new_triples.append(
+                Triple(
+                    triple_id=f"{subject_id}|{seed.predicate}|{object_id or seed.object_value}",
+                    subject_id=subject_id,
+                    predicate=seed.predicate,
+                    object_id=object_id,
+                    object_value=seed.object_value,
+                    scope=scope_enum,
+                    relation_type=seed.relation_type,
+                )
             )
-            await self._storage.write_triple(triple, scope_id=scope_id)
+        await self._storage.write_triples(new_triples, scope_id=scope_id)
 
         # 4. 返回该 scope 当前总量
         cursor = await conn.execute(
@@ -242,8 +262,13 @@ class ProjectBootstrap:
         scope_id: str | None,
         name: str,
         name_to_id: dict[str, str],
+        seen: set[str] | None = None,
     ) -> str:
-        """名称 → 实体 ULID;不存在时自动创建 concept 实体."""
+        """名称 → 实体 ULID;不存在时自动创建 concept 实体.
+
+        seen 为 apply_seeds 的 entity_id 去重集合(H7 跨批缓存):
+        新建实体的 entity_id 也要登记,避免后续批次重复创建同名 concept。
+        """
         if name in name_to_id:
             return name_to_id[name]
         entity = Entity(
@@ -254,6 +279,8 @@ class ProjectBootstrap:
         )
         await self._storage.write_entity(entity, scope_id=scope_id)
         name_to_id[name] = entity.id
+        if seen is not None:
+            seen.add(entity.entity_id)
         if self._vector_store is not None:
             await self._vector_store.add_text(
                 self._storage.conn, entity.name, entity_id=entity.id

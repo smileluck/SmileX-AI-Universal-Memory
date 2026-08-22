@@ -79,14 +79,19 @@ async def _run_temporal_strategy(
     query: HybridQuery,
     scope_filter: ScopeFilter | None,
 ) -> list[str]:
-    """时序策略:返回 triples.id 列表(按 valid_from 降序)."""
+    """时序策略:返回 triples.id 列表(按 valid_from 升序,LIMIT 下推 SQL)."""
     if query.time_range is None:
         return []
     start, end = query.time_range
     rows = await query_in_range(
-        conn, start, end, table="triples", scope_filter=scope_filter
+        conn,
+        start,
+        end,
+        table="triples",
+        scope_filter=scope_filter,
+        limit=query.top_k_per_strategy,
     )
-    return [r["id"] for r in rows[: query.top_k_per_strategy]]
+    return [r["id"] for r in rows]
 
 
 async def _run_graph_strategy(
@@ -102,6 +107,7 @@ async def _run_graph_strategy(
         query.entity_id,
         max_depth=2,
         scope_filter=scope_filter,
+        include_paths=False,  # M8: 只需 ID 集合,跳过路径构建/解析
     )
     related_ids = {r["entity_id"] for r in relations}
     related_ids.add(query.entity_id)

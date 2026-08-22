@@ -193,8 +193,12 @@ async def query_in_location(
     params: list[str] = []
 
     if include_children:
-        where_clauses.append("(path = ? OR path LIKE ?)")
-        params.extend([path, path + ".%"])
+        # 区间扫描代替 LIKE 'path.%'(M4): LIKE 默认大小写不敏感,无法命中
+        # idx_locations_path(BINARY)前缀索引;'.'(0x2E) 的下一字符是 '/'(0x2F),
+        # 故 [path + '.', path + '/') 恰为全部子层。语义差异: 不再大小写折叠
+        # (path 本身区分大小写,与索引排序一致)。
+        where_clauses.append("(path = ? OR (path >= ? AND path < ?))")
+        params.extend([path, path + ".", path + "/"])
     else:
         where_clauses.append("path = ?")
         params.append(path)

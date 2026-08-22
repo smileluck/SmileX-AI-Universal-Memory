@@ -370,3 +370,142 @@ async def test_write_uses_transaction(engine):
     # 直接读底层验证
     cursor = await engine.conn.execute("SELECT count(*) FROM entities")
     assert (await cursor.fetchone())[0] == 1
+
+
+# ---------- 批量写入(H1) ----------
+
+@pytest.mark.asyncio
+async def test_write_entities_batch(engine):
+    """write_entities 批量写入,返回 id 列表,逐条可读回."""
+    entities = [
+        Entity(
+            entity_id=f"person:batch_{i}",
+            entity_type="person",
+            name=f"Batch{i}",
+            scope=MemoryScope.GLOBAL,
+        )
+        for i in range(5)
+    ]
+    ids = await engine.write_entities(entities)
+    assert ids == [e.id for e in entities]
+
+    for e in entities:
+        fetched = await engine.get_entity(e.id)
+        assert fetched is not None
+        assert fetched.name == e.name
+
+
+@pytest.mark.asyncio
+async def test_write_entities_empty(engine):
+    """空列表直接返回,不开事务."""
+    assert await engine.write_entities([]) == []
+
+
+@pytest.mark.asyncio
+async def test_write_triples_batch(engine):
+    """write_triples 单事务批量写入,predicate 编码正确."""
+    triples = [
+        Triple(
+            triple_id=f"tri_b{i}",
+            subject_id="e1",
+            predicate="knows" if i % 2 == 0 else "likes",
+            object_id=f"e{i}",
+            scope=MemoryScope.GLOBAL,
+        )
+        for i in range(6)
+    ]
+    ids = await engine.write_triples(triples)
+    assert ids == [t.id for t in triples]
+
+    for t in triples:
+        fetched = await engine.get_triple(t.id)
+        assert fetched is not None
+        assert fetched.predicate == t.predicate
+
+    # 同谓词的 predicate_code 一致(字典编码语义不变)
+    cursor = await engine.conn.execute(
+        "SELECT DISTINCT predicate_code FROM triples WHERE predicate = 'knows'"
+    )
+    codes = [row[0] for row in await cursor.fetchall()]
+    assert len(codes) == 1
+
+
+@pytest.mark.asyncio
+async def test_write_triples_empty(engine):
+    assert await engine.write_triples([]) == []
+
+
+@pytest.mark.asyncio
+async def test_predicate_cache_hit(engine):
+    """predicate 缓存:同谓词第二次写入不查库(缓存命中)."""
+    from smilex.memory.storage.predicate_codec import encode_predicate
+
+    async with engine._engine.transaction() as conn:
+        code1 = await encode_predicate(conn, "cached_pred", cache=engine._predicate_cache)
+    assert engine._predicate_cache["cached_pred"] == code1
+
+    # 缓存命中路径:即使传入一个无法到达库的假连接也不应触发 SQL
+    class _ExplodingConn:
+        async def execute(self, *a, **kw):
+            raise AssertionError("缓存命中时不应执行 SQL")
+
+    code2 = await encode_predicate(
+        _ExplodingConn(), "cached_pred", cache=engine._predicate_cache
+    )
+    assert code2 == code1
+
+
+# ---------- embedding BLOB 存储(M5) ----------
+
+@pytest.mark.asyncio
+async def test_embedding_stored_as_blob(engine):
+    """新写入的 embedding 以 float32 BLOB 存储(非 JSON TEXT)."""
+    import numpy as np
+
+    emb = np.arange(8, dtype=np.float32) * 0.1
+    e = Entity(
+        entity_id="concept:blob",
+        entity_type="concept",
+        name="Blob",
+        scope=MemoryScope.GLOBAL,
+        embedding=emb,
+    )
+    eid = await engine.write_entity(e)
+
+    cursor = await engine.conn.execute(
+        "SELECT embedding, typeof(embedding) FROM entities WHERE id = ?", [eid]
+    )
+    row = await cursor.fetchone()
+    assert row[1] == "blob"
+    assert len(row[0]) == 8 * 4  # float32 × 8 维
+
+    fetched = await engine.get_entity(eid)
+    assert fetched.embedding.dtype == np.float32
+    np.testing.assert_allclose(fetched.embedding, emb, rtol=1e-6)
+
+
+@pytest.mark.asyncio
+async def test_embedding_legacy_json_compat(engine):
+    """存量 JSON TEXT 格式的 embedding 仍可正确读取(兼容路径)."""
+    import json
+
+    import numpy as np
+
+    e = Entity(
+        entity_id="concept:legacy",
+        entity_type="concept",
+        name="Legacy",
+        scope=MemoryScope.GLOBAL,
+    )
+    eid = await engine.write_entity(e)
+    # 模拟旧版本写入的 JSON TEXT
+    await engine.conn.execute(
+        "UPDATE entities SET embedding = ? WHERE id = ?",
+        [json.dumps([1.5, -2.5, 3.0]), eid],
+    )
+    await engine.conn.commit()
+
+    fetched = await engine.get_entity(eid)
+    assert fetched.embedding is not None
+    assert fetched.embedding.dtype == np.float32
+    np.testing.assert_allclose(fetched.embedding, [1.5, -2.5, 3.0], rtol=1e-6)

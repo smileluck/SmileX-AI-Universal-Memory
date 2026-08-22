@@ -18,11 +18,13 @@ Per 主文档 §18 + 模块文档 02 §4.1(vector_store.py,ChromaDB 适配 → �
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import aiosqlite
 import numpy as np
+from cachebox import LRUCache
 from sqlite_vec import serialize_float32
 
 from ...utils.ids import generate_id
@@ -85,6 +87,10 @@ class VectorStore:
 
     def __init__(self, embedder: Embedder | None = None) -> None:
         self.embedder: Embedder = embedder or get_embedder()
+        # query 文本 → 编码向量的 LRU(M7): recall 高频且 query 重复率高,
+        # 避免每次 knn_search 重新 embed。cachebox 为 Rust 原子操作,
+        # 单事件循环进程内使用无需额外锁(同 L0WorkingMemory)。
+        self._query_cache: LRUCache[str, np.ndarray] = LRUCache(maxsize=128)
 
     @property
     def dimension(self) -> int:
@@ -149,16 +155,30 @@ class VectorStore:
         triple_id: str | None = None,
         fragment_id: str | None = None,
     ) -> int:
-        """文本经 Embedder 编码后写入,返回 memory_vectors.rowid."""
+        """文本经 Embedder 编码后写入,返回 memory_vectors.rowid.
+
+        编码经 asyncio.to_thread 卸载(H3): SentenceTransformer 后端的
+        model.encode() 为 CPU 阻塞调用,直接在事件循环执行会卡住所有并发请求。
+        """
+        vector = await asyncio.to_thread(self.embedder.embed, text)
         return await self.add_vector(
             conn,
-            self.embedder.embed(text),
+            vector,
             entity_id=entity_id,
             triple_id=triple_id,
             fragment_id=fragment_id,
         )
 
     # ==================== 检索 ====================
+
+    async def _embed_query(self, query: str) -> np.ndarray:
+        """query 文本 → 向量:LRU 命中直接返回(M7),miss 时 to_thread 编码(H3)."""
+        cached = self._query_cache.get(query)
+        if cached is not None:
+            return cached
+        vec = await asyncio.to_thread(self.embedder.embed, query)
+        self._query_cache[query] = vec
+        return vec
 
     async def knn_search(
         self,
@@ -185,7 +205,7 @@ class VectorStore:
         if k <= 0:
             raise ValueError(f"k 必须为正整数,得到 {k!r}")
         if isinstance(query, str):
-            vec = self.embedder.embed(query)
+            vec = await self._embed_query(query)
         else:
             vec = _as_f32(query, self.dimension)
         blob = serialize_float32(vec.tolist())

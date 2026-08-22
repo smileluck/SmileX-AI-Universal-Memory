@@ -424,14 +424,11 @@ class MemoryMiddleware:
         自动解决(LWW)放行;拒绝/人工策略抛 _RelationConflictError 中止整笔写入。
         """
         scope_str = scope_path(request.scope, scope_id)
-        triple_ids: list[str] = []
+        # 批量解析名称引用的实体(H1): 一次 IN 查询代替逐条 SELECT
+        name_map = await self._resolve_entity_names(request, scope_id=scope_id)
+        triples: list[Triple] = []
         for rel in request.relations:
-            subject_id = await self._resolve_entity_ref(
-                request.scope,
-                scope_id,
-                entity_id=rel.subject_id,
-                name=rel.subject_name,
-            )
+            subject_id = rel.subject_id or name_map[rel.subject_name or ""]
             if detect:
                 guard = await self._concurrency.guard_triple_write(
                     self._engine.conn,
@@ -451,20 +448,57 @@ class MemoryMiddleware:
                             message=guard.resolution.message,
                         )
                     )
-            triple = Triple(
-                triple_id=(
-                    f"{subject_id}|{rel.predicate}|{rel.object_id or rel.object_value}"
-                ),
-                subject_id=subject_id,
-                predicate=rel.predicate,
-                object_id=rel.object_id,
-                object_value=rel.object_value,
-                scope=request.scope,
-                certainty=rel.certainty,
+            triples.append(
+                Triple(
+                    triple_id=(
+                        f"{subject_id}|{rel.predicate}|"
+                        f"{rel.object_id or rel.object_value}"
+                    ),
+                    subject_id=subject_id,
+                    predicate=rel.predicate,
+                    object_id=rel.object_id,
+                    object_value=rel.object_value,
+                    scope=request.scope,
+                    certainty=rel.certainty,
+                )
             )
-            await self._engine.write_triple(triple, scope_id=scope_id)
-            triple_ids.append(triple.id)
-        return triple_ids
+        # 单事务批量写入(H1): N 条 triple 只刷一次 WAL
+        await self._engine.write_triples(triples, scope_id=scope_id)
+        return [t.id for t in triples]
+
+    async def _resolve_entity_names(
+        self,
+        request: WriteRequest,
+        *,
+        scope_id: str | None,
+    ) -> dict[str, str]:
+        """批量解析 relations 中的 subject_name → entities.id(H1).
+
+        一次 `name IN (...)` 查出已存在实体;缺失的名称走 _resolve_entity_ref
+        的 get-or-create 路径补 concept 实体(同名去重,整笔请求只建一次)。
+        """
+        names = {
+            rel.subject_name
+            for rel in request.relations
+            if not rel.subject_id and rel.subject_name
+        }
+        for rel in request.relations:
+            if not rel.subject_id and not rel.subject_name:
+                raise ValueError("TripleInput 需要 subject_id 或 subject_name 之一")
+        if not names:
+            return {}
+        scope_str = scope_path(request.scope, scope_id)
+        placeholders = ",".join("?" for _ in names)
+        cursor = await self._engine.conn.execute(
+            f"SELECT id, name FROM entities WHERE scope = ? AND name IN ({placeholders})",
+            [scope_str, *names],
+        )
+        resolved = {str(row["name"]): str(row["id"]) for row in await cursor.fetchall()}
+        for name in names - resolved.keys():
+            resolved[name] = await self._resolve_entity_ref(
+                request.scope, scope_id, entity_id=None, name=name
+            )
+        return resolved
 
     async def _resolve_entity_ref(
         self,

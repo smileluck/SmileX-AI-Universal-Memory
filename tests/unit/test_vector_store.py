@@ -217,3 +217,39 @@ async def test_delete_requires_exactly_one_criterion(store_engine):
         await store.delete(eng.conn)
     with pytest.raises(ValueError, match="恰好给一个"):
         await store.delete(eng.conn, vector_id=1, entity_id="e1")
+
+
+# ---------- query 向量 LRU 缓存(M7) ----------
+
+class _SpyEmbedder(HashEmbedder):
+    """记录 embed 调用次数的 HashEmbedder."""
+
+    def __init__(self):
+        super().__init__()
+        self.embed_calls = 0
+
+    def embed(self, text: str) -> np.ndarray:
+        self.embed_calls += 1
+        return super().embed(text)
+
+
+@pytest.mark.asyncio
+async def test_knn_search_caches_query_embedding(store_engine):
+    """相同 query 第二次 knn_search 命中 LRU,不再调用 embedder."""
+    store, eng = store_engine
+    spy = _SpyEmbedder()
+    store.embedder = spy
+    store._query_cache.clear()
+
+    async with eng.transaction() as conn:
+        await store.add_text(conn, "alice works at CompanyX", entity_id="e1")
+    baseline = spy.embed_calls  # add_text 自身的编码不计入
+
+    await store.knn_search(eng.conn, "alice", k=5)
+    assert spy.embed_calls == baseline + 1
+    hits = await store.knn_search(eng.conn, "alice", k=5)
+    assert spy.embed_calls == baseline + 1  # 缓存命中
+    assert len(hits) == 1
+
+    await store.knn_search(eng.conn, "bob", k=5)
+    assert spy.embed_calls == baseline + 2  # 不同 query 正常编码

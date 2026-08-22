@@ -54,14 +54,15 @@ class ContextSource:
         memory_id: 记忆 ID(FuzzyMemory.id / vector_links 业务 ID / triples.id)
         layer: 来源层 — "L0"(工作记忆)/ "L1"(向量 KNN)/ "L2"(混合检索)
         content: 渲染后的文本内容
-        tokens: content 的 token 数
+        tokens: content 渲染行(``[层] content``)的 token 数;收集阶段不计算,
+            仅入选条目由 _greedy_fill 回填(未入选或未填充时为 0)
         score: 层内排序分(L0: importance;L1: 1/(1+distance);L2: RRF score)
     """
 
     memory_id: str
     layer: str
     content: str
-    tokens: int
+    tokens: int = 0
     score: float = 0.0
 
 
@@ -235,7 +236,6 @@ class ContextBuilder:
                         memory_id=hit.memory_id,
                         layer="L1",
                         content=content,
-                        tokens=self._counter.count(content),
                         score=1.0 / (1.0 + hit.distance),
                     )
                 )
@@ -265,7 +265,6 @@ class ContextBuilder:
                         memory_id=r["id"],
                         layer="L2",
                         content=content,
-                        tokens=self._counter.count(content),
                         score=r["score"],
                     )
                 )
@@ -287,7 +286,6 @@ class ContextBuilder:
                 memory_id=m.id,
                 layer="L0",
                 content=m.content or "",
-                tokens=self._counter.count_memory(m),
                 score=m.importance,
             )
             for m in memories
@@ -303,6 +301,8 @@ class ContextBuilder:
         """按优先级贪心填充(模块文档 03 §3.1 greedy_trim).
 
         逐条检查:装得下就入选,装不下标记裁剪并继续尝试后续更小的条目.
+        token 只在此处对渲染行计数一次(H2: 收集阶段不再预计算,避免双倍编码);
+        入选条目的 tokens 字段在此回填。
         """
         selected: list[ContextSource] = []
         lines: list[str] = []
@@ -314,6 +314,7 @@ class ContextBuilder:
             if used + line_tokens > budget:
                 truncated = True
                 continue
+            src.tokens = line_tokens
             selected.append(src)
             lines.append(line)
             used += line_tokens

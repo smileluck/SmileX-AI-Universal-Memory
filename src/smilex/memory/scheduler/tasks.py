@@ -62,6 +62,18 @@ def _scope_clause(scope: str | None, where: str, params: list[Any]) -> tuple[str
     return where, params
 
 
+def _pending_to_json(pending: dict[str, dict]) -> dict[str, dict]:
+    """consolidate 内存分组 → checkpoint 可 JSON 序列化的形态(集合转排序列表)."""
+    return {
+        k: {
+            **v,
+            "entities": sorted(v["entities"]),
+            "relations": sorted(v["relations"]),
+        }
+        for k, v in pending.items()
+    }
+
+
 def _rule_summary(content: str, summary_length: int) -> str:
     """规则版摘要:截取前 summary_length 字,优先在句末标点处截断."""
     if len(content) <= summary_length:
@@ -99,6 +111,10 @@ class CoreTaskRunner:
         被抢占后 resume 从 cursor 续扫,pending 分组不丢失;flush 完成后才落
         最终检查点,源片段只在 flush 阶段删除,中途抢占不会产生半整合状态.
 
+        pending 分组为可增量聚合的瘦身摘要(H5): 只存 id 列表 + 实体/关系集合
+        + max importance + 时间范围,不存 content(原文在 flush 阶段按 id 回查),
+        避免 checkpoint state 随扫描量 O(n²) 膨胀。
+
         payload:
             scope: 只整合该 scope(None = 全部)
             source_layer / target_layer: 默认 "L1" → "L2"
@@ -124,9 +140,16 @@ class CoreTaskRunner:
 
         # 断点恢复: cursor / pending / stats 全部来自上一检查点
         last_id = ctx.cursor if isinstance(ctx.cursor, str) else ""
-        pending: dict[str, list[dict]] = {
-            k: list(v) for k, v in ctx.state.get("pending", {}).items()
-        }
+        # pending 内存形态: key → {"ids": [...], "entities": set, "relations": set,
+        # "importance": max, "time_start": min, "time_end": max|None}(H5 瘦身,
+        # checkpoint 落库时集合转排序列表)
+        pending: dict[str, dict] = {}
+        for k, v in ctx.state.get("pending", {}).items():
+            pending[k] = {
+                **v,
+                "entities": set(v["entities"]),
+                "relations": set(v["relations"]),
+            }
         stats = {
             "scanned": 0,
             "groups": 0,
@@ -150,17 +173,26 @@ class CoreTaskRunner:
             for row in rows:
                 entities = sorted(json.loads(row["entities"]))
                 key = f"{row['scope']}|{','.join(entities)}"
-                pending.setdefault(key, []).append(
-                    {
-                        "id": row["id"],
-                        "content": row["content"],
-                        "entities": entities,
-                        "relations": json.loads(row["relations"]),
-                        "importance": float(row["importance"]),
+                g = pending.get(key)
+                if g is None:
+                    g = pending[key] = {
+                        "ids": [],
+                        "entities": set(),
+                        "relations": set(),
+                        "importance": 0.0,
                         "time_start": row["time_start"],
-                        "time_end": row["time_end"],
+                        "time_end": None,
                     }
-                )
+                g["ids"].append(row["id"])
+                g["entities"].update(entities)
+                g["relations"].update(json.loads(row["relations"]))
+                g["importance"] = max(g["importance"], float(row["importance"]))
+                if row["time_start"] < g["time_start"]:
+                    g["time_start"] = row["time_start"]
+                if row["time_end"] and (
+                    g["time_end"] is None or row["time_end"] > g["time_end"]
+                ):
+                    g["time_end"] = row["time_end"]
                 stats["scanned"] += 1
             last_id = rows[-1]["id"]
             step += 1
@@ -169,18 +201,18 @@ class CoreTaskRunner:
             await ctx.checkpoint(
                 step=step,
                 progress=min(0.9, stats["scanned"] / total) if total else 0.0,
-                state={"pending": pending, "stats": stats},
+                state={"pending": _pending_to_json(pending), "stats": stats},
                 cursor=last_id,
             )
 
         # ---- 阶段 2: flush — 成组的生成 L2 并删除 L1 源 ----
         for key in sorted(pending):
-            frags = pending[key]
-            if len(frags) < min_group:
+            g = pending[key]
+            if len(g["ids"]) < min_group:
                 continue
             scope_str, _, _ = key.partition("|")
             await self._flush_consolidation_group(
-                conn, scope_str, frags, target_layer, content_head, stats
+                conn, scope_str, g, target_layer, content_head, stats
             )
         step += 1
         await ctx.checkpoint(
@@ -195,21 +227,32 @@ class CoreTaskRunner:
         self,
         conn,
         scope_str: str,
-        frags: list[dict],
+        g: dict,
         target_layer: str,
         content_head: int,
         stats: dict,
     ) -> None:
-        """把一个分组的 L1 片段聚合成一条 L2 记忆,并删除源片段."""
-        entities = sorted({e for f in frags for e in f["entities"]})
-        relations = sorted({r for f in frags for r in f["relations"]})
+        """把一个分组的 L1 片段聚合成一条 L2 记忆,并删除源片段.
+
+        g 为瘦身摘要(H5);content 在此按 id 回查(ORDER BY id 保持扫描序).
+        """
+        ids: list[str] = g["ids"]
+        placeholders = ",".join("?" for _ in ids)
+        cur = await conn.execute(
+            f"SELECT content FROM temporal_fragments WHERE id IN ({placeholders}) "
+            "ORDER BY id",
+            ids,
+        )
+        contents = [r["content"] for r in await cur.fetchall()]
+
+        entities = sorted(g["entities"])
+        relations = sorted(g["relations"])
         label = ",".join(entities) if entities else scope_str
-        body = "; ".join(f["content"][:content_head] for f in frags)
-        content = f"{CONSOLIDATION_PREFIX}{label}:{len(frags)} 条记忆聚合 — {body}"
-        importance = max(f["importance"] for f in frags)
-        time_start = min(f["time_start"] for f in frags)
-        ends = [f["time_end"] for f in frags if f["time_end"]]
-        time_end = max(ends) if ends else None
+        body = "; ".join(c[:content_head] for c in contents)
+        content = f"{CONSOLIDATION_PREFIX}{label}:{len(ids)} 条记忆聚合 — {body}"
+        importance = g["importance"]
+        time_start = g["time_start"]
+        time_end = g["time_end"]
 
         now = to_iso(now_utc())
         new_id = generate_id()
@@ -232,15 +275,14 @@ class CoreTaskRunner:
                 now,
             ),
         )
-        placeholders = ",".join("?" for _ in frags)
         await conn.execute(
             f"DELETE FROM temporal_fragments WHERE id IN ({placeholders})",
-            [f["id"] for f in frags],
+            ids,
         )
         await conn.commit()
         stats["groups"] += 1
         stats["created"] += 1
-        stats["consolidated"] += len(frags)
+        stats["consolidated"] += len(ids)
 
     # ==================== 2. 遗忘任务(§7.3 遗忘 / §11.5 历史保留) ====================
 
@@ -304,29 +346,38 @@ class CoreTaskRunner:
             rows = await cur.fetchall()
             if not rows:
                 break
+            # 批内收集后一次性写库(M9): 代替逐行 DELETE/UPDATE
+            delete_ids: list[str] = []
+            demote_rows: list[tuple[float, str, str]] = []
             for row in rows:
                 stats["scanned"] += 1
                 expired = row["time_end"] is not None and from_iso(row["time_end"]) < now
                 age_days = max(0.0, (now - from_iso(row["updated_at"])).total_seconds() / 86400)
                 score = float(row["importance"]) * 0.5 ** (age_days / half_life_days)
                 if expired and forget_expired:
-                    await conn.execute("DELETE FROM temporal_fragments WHERE id = ?", [row["id"]])
+                    delete_ids.append(row["id"])
                     stats["expired"] += 1
                 elif score < threshold:
                     if demote:
-                        await conn.execute(
-                            "UPDATE temporal_fragments SET importance = ?, updated_at = ? "
-                            "WHERE id = ?",
-                            [score, to_iso(now), row["id"]],
-                        )
+                        demote_rows.append((score, to_iso(now), row["id"]))
                         stats["demoted"] += 1
                     else:
-                        await conn.execute(
-                            "DELETE FROM temporal_fragments WHERE id = ?", [row["id"]]
-                        )
+                        delete_ids.append(row["id"])
                         stats["forgotten"] += 1
                 else:
                     stats["kept"] += 1
+            if delete_ids:
+                id_ph = ",".join("?" for _ in delete_ids)
+                await conn.execute(
+                    f"DELETE FROM temporal_fragments WHERE id IN ({id_ph})",
+                    delete_ids,
+                )
+            if demote_rows:
+                await conn.executemany(
+                    "UPDATE temporal_fragments SET importance = ?, updated_at = ? "
+                    "WHERE id = ?",
+                    demote_rows,
+                )
             await conn.commit()
             last_id = rows[-1]["id"]
             step += 1
@@ -387,23 +438,25 @@ class CoreTaskRunner:
             rows = await cur.fetchall()
             if not rows:
                 break
+            # 批内一次 IN 查询已有摘要(M9),代替逐行 SELECT 1 存在性检查
+            fid_ph = ",".join("?" for _ in rows)
+            exist_cur = await conn.execute(
+                f"SELECT fragment_id FROM temporal_fragments WHERE fragment_id IN ({fid_ph})",
+                [f"{row['fragment_id']}{SUMMARY_ID_SUFFIX}" for row in rows],
+            )
+            existing = {r["fragment_id"] for r in await exist_cur.fetchall()}
+            insert_rows: list[tuple] = []
             for row in rows:
                 stats["scanned"] += 1
                 summary_fid = f"{row['fragment_id']}{SUMMARY_ID_SUFFIX}"
-                exists = await conn.execute(
-                    "SELECT 1 FROM temporal_fragments WHERE fragment_id = ? LIMIT 1",
-                    [summary_fid],
-                )
-                if await exists.fetchone() is not None:
+                if summary_fid in existing:
                     stats["skipped"] += 1
                     continue
+                existing.add(summary_fid)  # 同批内重复 fragment_id 幂等(同原逐行语义)
                 head = _rule_summary(row["content"], summary_length)
                 now = to_iso(now_utc())
                 new_id = generate_id()
-                await conn.execute(
-                    "INSERT INTO temporal_fragments(id, fragment_id, time_start, time_end, "
-                    "content, entities, relations, scope, layer, importance, "
-                    "created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                insert_rows.append(
                     (
                         new_id,
                         summary_fid,
@@ -417,9 +470,16 @@ class CoreTaskRunner:
                         row["importance"],
                         now,
                         now,
-                    ),
+                    )
                 )
                 stats["summarized"] += 1
+            if insert_rows:
+                await conn.executemany(
+                    "INSERT INTO temporal_fragments(id, fragment_id, time_start, time_end, "
+                    "content, entities, relations, scope, layer, importance, "
+                    "created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    insert_rows,
+                )
             await conn.commit()
             last_id = rows[-1]["id"]
             step += 1
@@ -590,7 +650,8 @@ class CoreTaskRunner:
             key = hashlib.md5(",".join(ids).encode()).hexdigest()[:12]  # 确定性分组键(非安全用途)
             top = sorted(comp, key=lambda e: (-degree.get(e, 0), e))[:top_k]
             top_names = [names.get(e, e) for e in top]
-            n_edges = graph.subgraph(comp).number_of_edges()
+            # 社区内边数 = 成员度和 / 2,无需 graph.subgraph(comp) 拷贝(M9)
+            n_edges = sum(degree.get(e, 0) for e in comp) // 2
             content = (
                 f"{SEMANTIC_COMMUNITY_PREFIX}{len(comp)} 个实体 / {n_edges} 条关系;"
                 f"核心实体: {', '.join(top_names)}"
@@ -612,14 +673,21 @@ class CoreTaskRunner:
                     now,
                 ),
             )
-            await conn.commit()
-            step += 1
-            await ctx.checkpoint(
-                step=step,
-                progress=0.3 + 0.7 * (i + 1) / len(components),
-                state={"stats": stats},
-                cursor=None,
-            )
+            # checkpoint 降频(M9): 每 50 个社区落一次断点(落库即隐式 commit),
+            # 代替每社区一次 DELETE+INSERT+commit
+            if (i + 1) % 50 == 0:
+                step += 1
+                await ctx.checkpoint(
+                    step=step,
+                    progress=0.3 + 0.7 * (i + 1) / len(components),
+                    state={"stats": stats},
+                    cursor=None,
+                )
+        await conn.commit()
+        step += 1
+        await ctx.checkpoint(
+            step=step, progress=1.0, state={"stats": stats}, cursor=None
+        )
         return stats
 
 
