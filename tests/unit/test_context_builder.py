@@ -12,6 +12,8 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
+
 import pytest
 
 from smilex.memory.lifecycle import (
@@ -23,6 +25,7 @@ from smilex.memory.lifecycle import (
 from smilex.memory.models import FuzzyMemory, MemoryScope
 from smilex.memory.storage.sqlite_engine import SQLiteEngine
 from smilex.memory.storage.vector_store import VectorStore
+from smilex.utils.timeutil import now_utc
 
 # ---------- Fixtures ----------
 
@@ -116,9 +119,21 @@ async def test_l0_full_load_with_marker(env):
 async def test_l0_sorted_by_importance_then_recency(env):
     """L0 层内按 importance 降序,同 importance 按 updated_at 降序(后写入在前)."""
     builder, l0, _, eng = env
-    l0.put("s1", FuzzyMemory(content="低重要性先写", importance=0.5, scope=MemoryScope.GLOBAL))
-    l0.put("s1", FuzzyMemory(content="低重要性后写", importance=0.5, scope=MemoryScope.GLOBAL))
-    l0.put("s1", FuzzyMemory(content="高重要性", importance=0.9, scope=MemoryScope.GLOBAL))
+    id1 = l0.put(
+        "s1", FuzzyMemory(content="低重要性先写", importance=0.5, scope=MemoryScope.GLOBAL)
+    )
+    id2 = l0.put(
+        "s1", FuzzyMemory(content="低重要性后写", importance=0.5, scope=MemoryScope.GLOBAL)
+    )
+    id3 = l0.put(
+        "s1", FuzzyMemory(content="高重要性", importance=0.9, scope=MemoryScope.GLOBAL)
+    )
+    # 显式控制时间戳: 低精度时钟(Windows py<3.13 约 15.6ms tick)下连续 put 会同 tick,
+    # 同 updated_at 时排序结果不稳定,测试必须固定 recency 顺序
+    base = now_utc()
+    l0.get("s1", id1).updated_at = base
+    l0.get("s1", id2).updated_at = base + timedelta(seconds=1)
+    l0.get("s1", id3).updated_at = base + timedelta(seconds=2)
 
     ctx = await builder.build_context(eng.conn, session_id="s1")
     lines = ctx.text.split("\n")
