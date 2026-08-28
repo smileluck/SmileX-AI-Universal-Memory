@@ -86,6 +86,7 @@ Web 面板为只读(概览统计 / 记忆浏览 / 召回测试);写入统一走 
 - [架构整合](docs/design/agent-memory-design.md) — 主架构 spec/contract
 - [模块总览](docs/design/modules/00-overview.md) — 13 个模块文档导航
 - [Embedding 选型](docs/analyse/embedding-layer.md) — 技术栈选型论证
+- [发布说明](docs/release-guide.md) — TestPyPI(测试)/ PyPI(生产)发布流程
 
 ## 阶段路线图
 
