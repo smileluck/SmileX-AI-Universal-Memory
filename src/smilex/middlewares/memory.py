@@ -113,6 +113,8 @@ class MemoryMiddleware:
         l0: L0 工作记忆(None 时新建默认实例)
         concurrency: Layer 4 并发控制器(None 时新建默认实例);
             注入可自定义锁超时/冲突解决策略
+        promotion_threshold: L0→L1 晋升阈值(默认 800 tokens;批量导入历史
+            数据等场景可调低,如 0 = 全部直入 L1 + 向量)
     """
 
     def __init__(
@@ -124,6 +126,7 @@ class MemoryMiddleware:
         token_counter: TokenCounter | None = None,
         l0: L0WorkingMemory | None = None,
         concurrency: ConcurrencyController | None = None,
+        promotion_threshold: int = 800,
     ) -> None:
         self._owns_engine = engine is None
         self._engine = engine or StorageEngine(db_path)
@@ -135,6 +138,7 @@ class MemoryMiddleware:
             self._l0,
             vector_store=self._vector_store,
             token_counter=self._counter,
+            threshold=promotion_threshold,
         )
         self._context_builder = ContextBuilder(
             l0=self._l0,

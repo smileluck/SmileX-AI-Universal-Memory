@@ -24,6 +24,10 @@ wheels/
 .coverage
 htmlcov/
 
+# Benchmark 数据与结果(不入库)
+benchmarks/longmemeval/data/
+benchmarks/longmemeval/results/
+
 # IDE
 .vscode/
 .idea/

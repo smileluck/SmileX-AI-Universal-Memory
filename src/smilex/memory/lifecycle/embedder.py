@@ -131,7 +131,12 @@ class SentenceTransformerEmbedder:
     def dimension(self) -> int:
         """输出维度.模型未加载时按 BGE-M3 的 1024 维返回(决策 D5)."""
         if self._model is not None:
-            return int(self._model.get_sentence_embedding_dimension())
+            # sentence-transformers v5 起 get_sentence_embedding_dimension 改名
+            # get_embedding_dimension;旧名仅作兼容回退
+            get_dim = getattr(self._model, "get_embedding_dimension", None)
+            if get_dim is None:
+                get_dim = self._model.get_sentence_embedding_dimension
+            return int(get_dim())
         return EMBEDDING_DIM
 
     @property

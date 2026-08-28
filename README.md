@@ -81,6 +81,82 @@ Web 面板为只读(概览统计 / 记忆浏览 / 召回测试);写入统一走 
 (`memory_recall` / `memory_write` / `memory_init_project` / `memory_stats`)。
 详见 [Server 层设计](docs/design/modules/13-server-layer.md)。
 
+## 记忆质量 Benchmark(LongMemEval)
+
+对标 mem0 的记忆评测,使用 [LongMemEval](https://huggingface.co/datasets/xiaowu0162/longmemeval)
+(longmemeval_s,500 题)评估长期记忆问答质量:对话历史灌入 → `recall()` 构建上下文
+→ LLM 生成答案 → LLM-as-judge 对比 gold,输出总分 / 各题型准确率 / 注入 token 数 / 检索延迟。
+
+```bash
+# 1. 安装依赖(embedding + benchmark extras)
+uv sync --extra embedding --extra benchmark
+
+# 2. 下载数据集(~270MB,缓存到 benchmarks/longmemeval/data/)
+uv run python benchmarks/longmemeval/download_dataset.py
+
+# 3. 配置 LLM(OpenAI 兼容 API,用于答案生成与判卷)
+export OPENAI_API_KEY=sk-...
+# 可选: OPENAI_BASE_URL / SMILEX_BENCH_ANSWER_MODEL / SMILEX_BENCH_JUDGE_MODEL(默认 gpt-4o-mini)
+
+# 4. 运行(先小规模试跑)
+uv run python benchmarks/longmemeval/run_benchmark.py --limit 50
+uv run python benchmarks/longmemeval/run_benchmark.py           # 全量 500 题
+```
+
+### 指定模型(任一 OpenAI 兼容服务)
+
+换模型只需改环境变量,代码零改动;生成与判卷模型独立配置,可混搭
+(如答案用 `glm-4.5-flash`、判卷用更稳的 `glm-4.5`):
+
+| 环境变量 | 作用 | 不设置时默认 |
+|---|---|---|
+| `OPENAI_API_KEY` | API key(必填) | 缺失则报错退出 |
+| `OPENAI_BASE_URL` | API 网关地址 | OpenAI 官方 |
+| `SMILEX_BENCH_ANSWER_MODEL` | 生成答案的模型 | `gpt-4o-mini` |
+| `SMILEX_BENCH_JUDGE_MODEL` | 判卷的模型 | `gpt-4o-mini` |
+
+常见配置示例:
+
+```bash
+# 智谱 GLM(免费额度大,推荐试跑)
+export OPENAI_BASE_URL=https://open.bigmodel.cn/api/paas/v4
+export SMILEX_BENCH_ANSWER_MODEL=glm-4.5-flash
+export SMILEX_BENCH_JUDGE_MODEL=glm-4.5-flash
+
+# DeepSeek
+export OPENAI_BASE_URL=https://api.deepseek.com/v1
+export SMILEX_BENCH_ANSWER_MODEL=deepseek-chat
+export SMILEX_BENCH_JUDGE_MODEL=deepseek-chat
+
+# OpenAI 官方(无需 BASE_URL)
+export SMILEX_BENCH_ANSWER_MODEL=gpt-4o-mini
+```
+
+也可以单行内联,不污染 shell 环境:
+
+```bash
+OPENAI_API_KEY=你的key \
+OPENAI_BASE_URL=https://open.bigmodel.cn/api/paas/v4 \
+SMILEX_BENCH_ANSWER_MODEL=glm-4.5-flash \
+SMILEX_BENCH_JUDGE_MODEL=glm-4.5-flash \
+uv run python benchmarks/longmemeval/run_benchmark.py --limit 10
+```
+
+### 其他运行参数
+
+```bash
+--embedder sentence-transformers  # 检索后端(默认 BGE-M3;--embedder hash 对比零依赖配置)
+--token-budget 4000               # recall 注入的上下文 token 预算
+--top-k 10                        # 检索条数
+--dump-context                    # 调试: 打印每题实际检索到的上下文
+--config longmemeval_s            # 数据集配置
+```
+
+- 默认 BGE-M3 语义检索(`--embedder hash` 可对比零依赖配置)
+- 每样本独立临时 db,全程走 `MemoryMiddleware` 公开 API(write / recall)
+- 结果存 `benchmarks/longmemeval/results/`(JSON 明细 + Markdown 摘要)
+- 无 API key 时可用 `uv run python benchmarks/longmemeval/_smoke_stub.py` 冒烟验证链路
+
 ## 设计文档
 
 - [架构整合](docs/design/agent-memory-design.md) — 主架构 spec/contract
