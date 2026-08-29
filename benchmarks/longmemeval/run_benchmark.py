@@ -57,61 +57,98 @@ async def run(args: argparse.Namespace) -> int:
     samples = load_samples(args.config, args.split, args.limit)
     print(f"样本数: {len(samples)}(config={args.config}, split={args.split})")
 
+    # checkpoint: 每题增量落盘,中断后 --resume 跳过已完成题
+    ckpt_path = (
+        RESULTS_DIR / f"ckpt_{args.config}_{args.split}_{args.embedder}.jsonl"
+    )
+    done: dict[int, dict] = {}
+    if args.resume and ckpt_path.exists():
+        for line in ckpt_path.open(encoding="utf-8"):
+            rec = json.loads(line)
+            done[rec["idx"]] = rec
+        print(f"resume: 已完成 {len(done)} 题({ckpt_path.name})")
+
     records: list[dict] = []
     correct_total = 0
     by_type: dict[str, list[bool]] = defaultdict(list)
     recall_latencies: list[float] = []
     ingest_seconds: list[float] = []
 
+    def _accumulate(rec: dict) -> None:
+        nonlocal correct_total
+        correct_total += rec["correct"]
+        by_type[rec["question_type"]].append(rec["correct"])
+        recall_latencies.append(rec["recall_s"])
+        ingest_seconds.append(rec["ingest_s"])
+        records.append(rec)
+
     start_all = time.perf_counter()
-    for idx, sample in enumerate(samples, 1):
-        question = sample["question"]
-        gold = sample["answer"]
-        qtype = sample.get("question_type", "unknown")
+    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    with ckpt_path.open("a", encoding="utf-8") as ckpt:
+        for idx, sample in enumerate(samples, 1):
+            if idx in done:
+                _accumulate(done[idx])
+                print(f"[{idx}/{len(samples)}] (skip, cached)")
+                continue
 
-        with tempfile.TemporaryDirectory(prefix="lme_") as tmpdir:
-            mw, n_chunks, ingest_s = await ingest_sample(
-                sample, embedder, Path(tmpdir) / "bench.db"
-            )
-            ingest_seconds.append(ingest_s)
+            question = sample["question"]
+            gold = sample["answer"]
+            qtype = sample.get("question_type", "unknown")
+
             try:
-                result = await answer_question(
-                    mw, question, client,
-                    token_budget=args.token_budget, top_k=args.top_k,
+                with tempfile.TemporaryDirectory(prefix="lme_") as tmpdir:
+                    mw, n_chunks, ingest_s = await ingest_sample(
+                        sample, embedder, Path(tmpdir) / "bench.db"
+                    )
+                    try:
+                        result = await answer_question(
+                            mw, question, client,
+                            token_budget=args.token_budget, top_k=args.top_k,
+                        )
+                    finally:
+                        await mw.close()
+
+                correct, verdict_raw, judge_tokens = await judge_answer(
+                    client, question, gold, result["answer"]
                 )
-            finally:
-                await mw.close()
+                recall_s = result["recall_s"]
+                context_tokens = result["context_tokens"]
+                n_chunks_rec = n_chunks
+                ingest_s_rec = round(ingest_s, 2)
+            except Exception as exc:  # 单题失败(网络/配额等)不崩整个 run
+                print(f"[{idx}/{len(samples)}] 样本失败: {type(exc).__name__}: {exc}")
+                correct, verdict_raw, judge_tokens = False, f"error: {exc}", 0
+                result = {"answer": "", "context_tokens": 0, "recall_s": 0.0}
+                recall_s, context_tokens = 0.0, 0
+                n_chunks_rec, ingest_s_rec = 0, 0.0
 
-        correct, verdict_raw, judge_tokens = await judge_answer(
-            client, question, gold, result["answer"]
-        )
-        recall_latencies.append(result["recall_s"])
-        correct_total += correct
-        by_type[qtype].append(correct)
-        records.append({
-            "idx": idx,
-            "question_type": qtype,
-            "question": question,
-            "gold": gold,
-            "prediction": result["answer"],
-            "correct": correct,
-            "verdict_raw": verdict_raw,
-            "context_tokens": result["context_tokens"],
-            "recall_s": round(result["recall_s"], 4),
-            "llm_tokens": result["llm_tokens"],
-            "judge_tokens": judge_tokens,
-            "n_chunks": n_chunks,
-            "ingest_s": round(ingest_s, 2),
-        })
+            rec = {
+                "idx": idx,
+                "question_type": qtype,
+                "question": question,
+                "gold": gold,
+                "prediction": result["answer"],
+                "correct": correct,
+                "verdict_raw": verdict_raw,
+                "context_tokens": context_tokens,
+                "recall_s": round(recall_s, 4),
+                "llm_tokens": result.get("llm_tokens", 0),
+                "judge_tokens": judge_tokens,
+                "n_chunks": n_chunks_rec,
+                "ingest_s": ingest_s_rec,
+            }
+            _accumulate(rec)
+            ckpt.write(json.dumps(rec, ensure_ascii=False) + "\n")
+            ckpt.flush()
 
-        acc = correct_total / idx * 100
-        mark = "✓" if correct else "✗"
-        print(
-            f"[{idx}/{len(samples)}] {mark} acc={acc:.1f}% | {qtype} | "
-            f"ctx={result['context_tokens']}tok recall={result['recall_s']:.2f}s"
-        )
-        if args.dump_context:
-            print(f"  --- context ---\n{result['context']}\n  ---------------")
+            acc = correct_total / idx * 100
+            mark = "✓" if correct else "✗"
+            print(
+                f"[{idx}/{len(samples)}] {mark} acc={acc:.1f}% | {qtype} | "
+                f"ctx={context_tokens}tok recall={recall_s:.2f}s"
+            )
+            if args.dump_context:
+                print(f"  --- context ---\n{result.get('context', '')}\n  ---------------")
 
     elapsed = time.perf_counter() - start_all
     return write_report(args, samples, records, by_type, recall_latencies,
@@ -174,6 +211,8 @@ def main() -> int:
     parser.add_argument("--token-budget", type=int, default=4000)
     parser.add_argument("--top-k", type=int, default=10)
     parser.add_argument("--dump-context", action="store_true", help="打印每题检索上下文")
+    parser.add_argument("--resume", action="store_true",
+                        help="从 checkpoint 续跑(跳过已完成题,复用其结果)")
     args = parser.parse_args()
     return asyncio.run(run(args))
 

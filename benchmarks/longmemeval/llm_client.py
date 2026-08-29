@@ -14,6 +14,7 @@ thinking disabled;其他 OpenAI 兼容网关不受影响.
 from __future__ import annotations
 
 import os
+import sys
 
 from openai import AsyncOpenAI
 
@@ -57,16 +58,22 @@ async def chat(
     生成场景保持模型默认(思考有助于长上下文事实抽取),max_tokens 需给足.
     """
     extra = _extra_body(model) if disable_thinking else None
-    resp = await client.chat.completions.create(
-        model=model,
-        temperature=0.0,
-        max_tokens=max_tokens,
-        extra_body=extra,
-        messages=[
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
-        ],
-    )
+    try:
+        resp = await client.chat.completions.create(
+            model=model,
+            temperature=0.0,
+            max_tokens=max_tokens,
+            extra_body=extra,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+        )
+    except Exception as exc:
+        # 内容安全过滤(智谱 1301 等 400 不可重试) / 瞬时网络异常重试耗尽等:
+        # 打印后返回空文本,调用方按"生成失败"记 0 分,不让单题崩掉整个 run
+        print(f"[llm] {type(exc).__name__}: {str(exc)[:120]}", file=sys.stderr)
+        return "", 0
     content = resp.choices[0].message.content
     usage = resp.usage.total_tokens if resp.usage else 0
     return (content or "").strip(), usage

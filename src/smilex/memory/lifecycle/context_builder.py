@@ -1,9 +1,10 @@
 """ContextBuilder — Token Budget 上下文构建(主文档 §12.1 / §7.5,L2.7).
 
 Per 主文档 §12.1 + 模块文档 03 §3.1:
-- 多路召回聚合: L0 工作记忆(全量)+ L1 向量 KNN(Top-K)+ L2 混合检索(RRF)
+- 多路召回聚合: L0 工作记忆(全量)+ L1 双通道(向量 KNN + FTS5 BM25,RRF 融合)
+  + L2 混合检索(RRF)
 - 去重: 同一 memory 来自多路召回只保留一份(优先级 L0 > L1 > L2)
-- 排序: L0 按 importance/recency,L1 按向量距离,L2 按 RRF 相关度
+- 排序: L0 按 importance/recency,L1 按 RRF 融合分,L2 按 RRF 相关度
 - 贪心裁剪: 按 L0 > L1 > L2 优先级逐条填充,预算 = token_budget × 0.7(安全边际)
 - 输出带来源标记([L0]/[L1]/[L2] 前缀),便于上层追溯
 
@@ -26,6 +27,8 @@ from typing import TYPE_CHECKING
 import aiosqlite
 
 from ..storage.queries import HybridQuery, hybrid_memory_search
+from ..storage.queries.fts import bm25_fragment_search
+from ..storage.queries.hybrid import rrf_fusion
 from .token_counter import TokenCounter
 
 if TYPE_CHECKING:
@@ -41,6 +44,9 @@ SAFETY_MARGIN = 0.7
 # 各层召回的默认 Top-K(§12.1: L1 top_k=5, L2 top_k=10)
 DEFAULT_L1_TOP_K = 5
 DEFAULT_L2_TOP_K = 10
+
+# L1 双通道(向量 + BM25)RRF 融合常数(与 L2 hybrid 一致取 60)
+RRF_K = 60
 
 # 层优先级(数值越小越优先填充)
 _LAYER_PRIORITY = {"L0": 0, "L1": 1, "L2": 2}
@@ -218,25 +224,38 @@ class ContextBuilder:
                 seen.add(src.memory_id)
                 candidates.append(src)
 
-        # L1: 向量 KNN(§12.1 vector_search top_k=5)
+        # L1: 双通道 — 向量 KNN + FTS5 BM25 关键词,RRF 融合(schema 013)
         if query_text is not None and self._vector_store is not None:
             hits = await self._vector_store.knn_search(
                 conn, query_text, k=l1_top_k, scope_filter=scope_filter
             )
-            content_map = await _load_content_map(
-                conn, [h.memory_id for h in hits]
-            )
-            for hit in hits:
-                if hit.memory_id in seen or hit.memory_id not in content_map:
+            # 关键词通道: 精确词命中(向量近似检索不到的,如专有名词/日期)
+            fts_ids: list[str] = []
+            try:
+                fts_ids = await bm25_fragment_search(
+                    conn, query_text, scope_filter=scope_filter, top_k=l1_top_k * 2
+                )
+            except aiosqlite.OperationalError:
+                fts_ids = []  # fts_fragments 不存在(老库未迁移)时降级纯向量
+            rankings = [
+                [h.memory_id for h in hits],
+                fts_ids,
+            ]
+            fused = rrf_fusion(rankings, k=RRF_K)
+            content_map = await _load_content_map(conn, [i for i, _ in fused])
+            # RRF score 归一化到 [0,1](除以双通道理论最大值 2/(k+1)),
+            # 保持 ContextSource.score 契约
+            max_rrf = sum(1.0 / (RRF_K + 1) for _ in rankings if _)
+            for memory_id, rrf_score in fused:
+                if memory_id in seen or memory_id not in content_map:
                     continue
-                seen.add(hit.memory_id)
-                content = content_map[hit.memory_id]
+                seen.add(memory_id)
                 candidates.append(
                     ContextSource(
-                        memory_id=hit.memory_id,
+                        memory_id=memory_id,
                         layer="L1",
-                        content=content,
-                        score=1.0 / (1.0 + hit.distance),
+                        content=content_map[memory_id],
+                        score=rrf_score / max_rrf if max_rrf > 0 else 0.0,
                     )
                 )
 

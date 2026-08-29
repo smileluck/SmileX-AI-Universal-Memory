@@ -14,10 +14,11 @@ from llm_client import chat, judge_model
 
 JUDGE_SYSTEM = (
     "You are a strict grader. Compare the predicted answer against the gold "
-    "answer for the given question. The prediction is correct ONLY if it "
-    "conveys the same fact(s) as the gold answer (tolerate formatting, "
-    "units, and alias differences; missing key details = incorrect; "
-    "'I don't know.' matches only when the gold answer says so). "
+    "answer for the given question. The prediction is correct if it conveys "
+    "the gold answer's key fact(s) — tolerate formatting, phrasing, units, "
+    "and alias differences, and additional correct details do NOT make it "
+    "wrong. Missing or contradicting the gold key fact = incorrect. "
+    "'I don't know.' matches only when the gold answer says so. "
     "Reply with exactly one line: 'yes' or 'no'."
 )
 

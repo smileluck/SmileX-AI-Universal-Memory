@@ -61,7 +61,8 @@ async def main() -> int:
     parser.add_argument("--token-budget", type=int, default=4000)
     parser.add_argument("--top-k", type=int, default=10)
     parser.add_argument("--dump-context", action="store_true")
-    args = parser.parse_args(["--limit", "2", "--embedder", "hash"])
+    parser.add_argument("--resume", action="store_true")
+    args = parser.parse_args(["--limit", "2", "--embedder", "hash", "--resume"])
     return await run_benchmark.run(args)
 
 
