@@ -157,6 +157,38 @@ uv run python benchmarks/longmemeval/run_benchmark.py --limit 10
 - 结果存 `benchmarks/longmemeval/results/`(JSON 明细 + Markdown 摘要)
 - 无 API key 时可用 `uv run python benchmarks/longmemeval/_smoke_stub.py` 冒烟验证链路
 
+## 记忆质量 Benchmark(LoCoMo)
+
+对标 mem0 / Zep 的记忆评测,使用
+[LoCoMo](https://github.com/snap-research/locomo)(locomo10,10 个长对话 /
+1986 题)评估超长多 session 对话的记忆问答质量。与 LongMemEval 共用同一套
+作答 / 判卷 / LLM 客户端约定(环境变量完全一致,见上文模型配置表)。
+
+```bash
+# 1. 安装依赖(与 LongMemEval 相同)
+uv sync --extra embedding --extra benchmark
+
+# 2. 下载数据集(~2.7MB,缓存到 benchmarks/locomo/data/)
+uv run python benchmarks/locomo/download_dataset.py
+
+# 3. 配置 LLM(同 LongMemEval: OPENAI_API_KEY 等)
+
+# 4. 运行(先小规模试跑)
+uv run python benchmarks/locomo/run_benchmark.py --limit 1 --max-qa 5
+uv run python benchmarks/locomo/run_benchmark.py --resume   # 全量 10 对话 1986 题
+```
+
+与 LongMemEval 的差异:
+
+- **数据形态**:每个样本是单人双 speaker 超长对话(19~32 个 session /
+  419~689 轮),question 挂在对话上;同一对话的所有题共享一次灌入
+  (checkpoint 键 `conv_idx + q_idx`),全量灌入仅 10 次
+- **题型**:single-hop / multi-hop / temporal / open-domain / adversarial,
+  按题型分组报告
+- **adversarial 判分**:该题型语义为"对话中不可回答",gold 视作
+  "I don't know.",模型拒答才得分(与 LongMemEval abstention 语义统一)
+- 结果存 `benchmarks/locomo/results/`(JSON 明细 + Markdown 摘要)
+
 ## 设计文档
 
 - [架构整合](docs/design/agent-memory-design.md) — 主架构 spec/contract
