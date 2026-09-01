@@ -39,12 +39,13 @@ from llm_client import get_client
 
 RESULTS_DIR = Path(__file__).parent / "results"
 
-# LoCoMo 官方 category 编号 → 题型名
+# LoCoMo category 编号 → 题型名(以 mem0 实现为准,与论文编号不同:
+# 各 category 题量 1:282 2:321 3:96 4:841 5:446 与此映射吻合)
 CATEGORY_NAMES = {
-    1: "single_hop",
-    2: "multi_hop",
-    3: "temporal",
-    4: "open_domain",
+    1: "multi_hop",
+    2: "temporal",
+    3: "open_domain",
+    4: "single_hop",
     5: "adversarial",
 }
 

@@ -1,0 +1,209 @@
+{
+  "report": "=== LongMemEval mem0 兼容口径(source=original) — smilex-ai-memory(embedder=sentence-transformers) ===\nanswerer=glm-4.5-flash judge=glm-4.5-flash (mem0 官方为 gpt-5/gpt-5,比较时注意)\n\n== cutoff 10 — n=6, Overall=83.3 % ==\n    knowledge-update           1 题  100.0 %\n    multi-session              1 题  0.0 %\n    single-session-assistant   1 题  100.0 %\n    single-session-preference   1 题  100.0 %\n    single-session-user        1 题  100.0 %\n    temporal-reasoning         1 题  100.0 %\n\n== cutoff 20 — n=6, Overall=83.3 % ==\n    knowledge-update           1 题  100.0 %\n    multi-session              1 题  0.0 %\n    single-session-assistant   1 题  100.0 %\n    single-session-preference   1 题  100.0 %\n    single-session-user        1 题  100.0 %\n    temporal-reasoning         1 题  100.0 %\n\n== cutoff 50 — n=6, Overall=83.3 % ==\n    knowledge-update           1 题  100.0 %\n    multi-session              1 题  0.0 %\n    single-session-assistant   1 题  100.0 %\n    single-session-preference   1 题  100.0 %\n    single-session-user        1 题  100.0 %\n    temporal-reasoning         1 题  100.0 %\n\n== cutoff 200 (headline) — n=6, Overall=50.0 % ==\n    knowledge-update           1 题  100.0 %\n    multi-session              1 题  0.0 %\n    single-session-assistant   1 题  100.0 %\n    single-session-preference   1 题  0.0 %\n    single-session-user        1 题  100.0 %\n    temporal-reasoning         1 题  0.0 %\n\nTotal Time 65.6 min",
+  "records": [
+    {
+      "qid": "18bc8abd",
+      "question_type": "knowledge-update",
+      "question": "What brand of BBQ sauce am I currently obsessed with?",
+      "gold": "Kansas City Masterpiece",
+      "cutoffs": {
+        "10": true,
+        "20": true,
+        "50": true,
+        "200": true
+      },
+      "results": {
+        "10": {
+          "answer": "Kansas City Masterpiece BBQ sauce.",
+          "correct": true,
+          "label": "yes"
+        },
+        "20": {
+          "answer": "Kansas City Masterpiece BBQ sauce.",
+          "correct": true,
+          "label": "yes"
+        },
+        "50": {
+          "answer": "Kansas City Masterpiece BBQ sauce.",
+          "correct": true,
+          "label": "yes"
+        },
+        "200": {
+          "answer": "Based on the memories, you are currently obsessed with Kansas City Masterpiece BBQ sauce. You've mentioned this multiple times, including that you're \"currently obsessed with Kansas City Masterpiece BBQ sauce on my ribs\" and that it's your \"favourite\" BBQ sauce.",
+          "correct": true,
+          "label": "yes"
+        }
+      }
+    },
+    {
+      "qid": "0a995998",
+      "question_type": "multi-session",
+      "question": "How many items of clothing do I need to pick up or return from a store?",
+      "gold": "3",
+      "cutoffs": {
+        "10": false,
+        "20": false,
+        "50": false,
+        "200": false
+      },
+      "results": {
+        "10": {
+          "answer": "1 item (the new pair of boots from Zara).",
+          "correct": false,
+          "label": "no"
+        },
+        "20": {
+          "answer": "You need to pick up or return 2 items:\n1. New boots from Zara (after exchanging on 2/5)\n2. Dry cleaning for your navy blue blazer",
+          "correct": false,
+          "label": "no"
+        },
+        "50": {
+          "answer": "You need to pick up or return 2 items:\n1. Dry cleaning for your navy blue blazer\n2. New boots from Zara (after exchanging them on February 5th)",
+          "correct": false,
+          "label": "no"
+        },
+        "200": {
+          "answer": "Based on the memories, you need to pick up or return 2 items of clothing:\n\n1. Your navy blue blazer from the dry cleaner (mentioned in the memory from 2023/02/15 (Wed) 06:30)\n2. The new boots from Zara that you exchanged on February 5th (mentioned in the memory from 2023/02/15 (Wed) 09:28)",
+          "correct": false,
+          "label": "no"
+        }
+      }
+    },
+    {
+      "qid": "e3fc4d6e",
+      "question_type": "single-session-assistant",
+      "question": "I wanted to follow up on our previous conversation about the fusion breakthrough at Lawrence Livermore National Laboratory. Can you remind me who is the President's Chief Advisor for Science and Technology mentioned in the article?",
+      "gold": "Dr. Arati Prabhakar",
+      "cutoffs": {
+        "10": true,
+        "20": true,
+        "50": true,
+        "200": true
+      },
+      "results": {
+        "10": {
+          "answer": "Dr. Arati Prabhakar is the President's Chief Advisor for Science and Technology mentioned in the article.",
+          "correct": true,
+          "label": "yes"
+        },
+        "20": {
+          "answer": "Dr. Arati Prabhakar is the President's Chief Advisor for Science and Technology and Director of the White House Office of Science and Technology Policy, as mentioned in the article about the fusion breakthrough at Lawrence Livermore National Laboratory.",
+          "correct": true,
+          "label": "yes"
+        },
+        "50": {
+          "answer": "Dr. Arati Prabhakar is the President's Chief Advisor for Science and Technology mentioned in the article about the fusion breakthrough at Lawrence Livermore National Laboratory.",
+          "correct": true,
+          "label": "yes"
+        },
+        "200": {
+          "answer": "Dr. Arati Prabhakar is the President's Chief Advisor for Science and Technology mentioned in the article about the fusion breakthrough at Lawrence Livermore National Laboratory. She is also the Director of the White House Office of Science and Technology Policy.",
+          "correct": true,
+          "label": "yes"
+        }
+      }
+    },
+    {
+      "qid": "1c0ddc50",
+      "question_type": "single-session-preference",
+      "question": "Can you suggest some activities I can do during my commute to work?",
+      "gold": "The user would prefer suggestions related to listening to new podcasts or audiobooks, especially the genre beyond true crime or self-improvement, such as history. They may not be interested in activities that require visual attention, such as reading or watching videos, as they are commuting. The user would not prefer general podcast topics such as true crime or self-improvement, as the user wants to explore other topics.",
+      "cutoffs": {
+        "10": true,
+        "20": true,
+        "50": true,
+        "200": false
+      },
+      "results": {
+        "10": {
+          "answer": "Based on your preferences and past activities, here are some suggestions for your commute:\n\n- Listen to history podcasts (you mentioned interest in these and have a 40-minute commute each way)\n- Continue with podcasts like \"How I Built This\" which you've already enjoyed\n- Try audiobooks or language learning apps\n- Create motivational music playlists\n- Use the time for mental preparation for your workday\n- Avoid checking email and social media (as you've noted this wastes time)",
+          "correct": true,
+          "label": "yes"
+        },
+        "20": {
+          "answer": "Based on your 40-minute commute and your interests, here are some activities you can do during your trip to work:\n\n1. **History Podcasts**: Since you're interested in history and have a 40-minute commute, you could listen to podcasts like \"Hardcore History,\" \"Lore,\" or \"The Dollop\" - perfect for your commute length.\n\n2. **Language Learning**: Use apps like Duolingo or Babbel to improve your language skills during your commute.\n\n3. **Audiobooks**: Catch up on books you've been wanting to read - many libraries offer free audiobook apps.\n\n4. **Mental Preparation**: Use the time to mentally prepare for your day, prioritize tasks, and plan your schedule.\n\n5. **Music**: Create motivational playlists or discover new artists to make your commute more enjoyable.\n\nSince you're considering biking to work, these activities would work well whether you're on a bus, bike, or walking. The key is finding content that engages you for the full 40-minute journey.",
+          "correct": true,
+          "label": "yes"
+        },
+        "50": {
+          "answer": "Based on your 40-minute commute and your interest in branching out from podcasts, here are some activities you can try:\n\n1. **Continue with podcasts** - Since you enjoy \"How I Built This,\" you could explore more entrepreneur-focused podcasts or try history podcasts like \"Hardcore History\" or \"Lore\" that you've shown interest in.\n\n2. **Audiobooks** - Perfect for longer commutes, you could dive into a book that interests you.\n\n3. **Language learning** - Use apps like Duolingo or Babbel to practice a new language during your commute.\n\n4. **Meditation or mindfulness** - Use apps like Headspace or Calm for short meditation sessions to start or end your day calmly.\n\n5. **News updates** - Catch up on current events with news podcasts or apps.\n\n6. **Educational content** - Listen to TED Talks or educational series related to your interests.\n\nSince you've been productive with podcasts during your commute, building on that habit with new genres like history or educational content would be a natural extension of what you already enjoy.",
+          "correct": true,
+          "label": "yes"
+        },
+        "200": {
+          "answer": "Based on your 40-minute commute and your interest in podcasts, here are some activities you could do during your commute:\n\n**Audio-Based Activities:**\n\n1. **Continue with Podcasts**: Since you've been enjoying \"How I Built This\" and entrepreneurial stories, you could explore similar podcasts like:\n   - \"How I Built This\" (if you haven't finished it)\n   - \"The Tim Ferriss Show\" for interviews with successful people\n   - \"My First Million\" for business and entrepreneurship insights\n   - \"The Anxious Achiever\" for productivity and mindset discussions\n\n2. **History Podcasts**: You mentioned interest in history, so consider:\n   - \"Hardcore History\" by Dan Carlin for in-depth historical narratives\n   - \"Lore\" by Aaron Mahnke for mysterious historical tales\n   - \"The Dollop\" for comedic takes on weird historical events\n   - \"You're Dead to Me\" for accessible history lessons\n\n3. **Science Podcasts**: Since you've shown interest in science:\n   - \"StarTalk Radio\" with Neil deGrasse Tyson\n   - \"Radiolab\" for fascinating science stories\n   - \"Stuff You Should Know\" for educational topics\n   - \"Science Vs\" for evidence-based discussions\n\n4. **Language Learning**: Use your commute to learn a new language with apps like:\n   - Duolingo\n   - Babbel\n   - Rosetta Stone\n   - Pimsleur\n\n**Other Options:**\n\n5. **Audiobooks**: Listen to books on platforms like Audible or Libby\n6. **Music**: Create playlists that match your mood or energy level\n7. **Meditation/Relaxation**: Use apps like Calm or Headspace for guided meditation\n8. **News Updates**: Catch up on news with apps like NPR or BBC\n9. **Plan Your Day**: Use voice notes to organize your thoughts and priorities for the day\n\nSince you've been using voice control on your smart TV, you might also consider using voice commands on your phone during your commute if it's safe to do so.\n\nWhat type of activities interest you most for your commute?",
+          "correct": false,
+          "label": "no"
+        }
+      }
+    },
+    {
+      "qid": "6b168ec8",
+      "question_type": "single-session-user",
+      "question": "How many bikes do I own?",
+      "gold": "three",
+      "cutoffs": {
+        "10": true,
+        "20": true,
+        "50": true,
+        "200": true
+      },
+      "results": {
+        "10": {
+          "answer": "You own 3 bikes: a road bike, a mountain bike, and a commuter bike.",
+          "correct": true,
+          "label": "yes"
+        },
+        "20": {
+          "answer": "You own 3 bikes: a road bike, a mountain bike, and a commuter bike.",
+          "correct": true,
+          "label": "yes"
+        },
+        "50": {
+          "answer": "You own 3 bikes: a road bike, a mountain bike, and a commuter bike.",
+          "correct": true,
+          "label": "yes"
+        },
+        "200": {
+          "answer": "You own 3 bikes: a road bike (which is a Trek Emonda), a mountain bike, and a commuter bike. You've mentioned using them for different types of rides and have been researching upgrades like carbon fiber wheels for your road bike.",
+          "correct": true,
+          "label": "yes"
+        }
+      }
+    },
+    {
+      "qid": "gpt4_2655b836",
+      "question_type": "temporal-reasoning",
+      "question": "What was the first issue I had with my new car after its first service?",
+      "gold": "GPS system not functioning correctly",
+      "cutoffs": {
+        "10": true,
+        "20": true,
+        "50": true,
+        "200": false
+      },
+      "results": {
+        "10": {
+          "answer": "The first issue you had with your new car after its first service was a GPS system malfunction on March 22nd, which required you to take it back to the dealership for repair. They replaced the entire system and resolved the issue.",
+          "correct": true,
+          "label": "yes"
+        },
+        "20": {
+          "answer": "The first issue you had with your new car after its first service was with the GPS system on March 22nd. You had to take it back to the dealership to get it fixed, and they replaced the entire system.",
+          "correct": true,
+          "label": "yes"
+        },
+        "50": {
+          "answer": "The first issue you had with your new car after its first service was a GPS system problem on March 22nd. You had to take the car back to the dealership, and they replaced the entire system, which then worked flawlessly.",
+          "correct": true,
+          "label": "yes"
+        },
+        "200": {
+          "answer": "",
+          "correct": false,
+          "label": "no"
+        }
+      }
+    }
+  ]
+}

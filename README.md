@@ -189,6 +189,92 @@ uv run python benchmarks/locomo/run_benchmark.py --resume   # 全量 10 对话 1
   "I don't know.",模型拒答才得分(与 LongMemEval abstention 语义统一)
 - 结果存 `benchmarks/locomo/results/`(JSON 明细 + Markdown 摘要)
 
+## 检索基线对比(裸 BGE-M3 vs 记忆管线)
+
+量化记忆算法相对 naive RAG 的检索增益:同一份数据、同一种切块,对比两条通道的
+R@10 —— `raw`(切块 → BGE-M3 向量 → 纯余弦 KNN,即"直接用 embedding 模型做
+向量库检索"的基线)与 `smilex`(向量 KNN + BM25/FTS5 关键词通道 RRF 融合)。
+不需要 LLM API key,纯本地检索评测。
+
+```bash
+uv sync --extra embedding   # 只需 embedding,无需 LLM
+uv run python benchmarks/retrieval_baseline/run_baseline.py --dataset locomo --limit 1
+uv run python benchmarks/retrieval_baseline/run_baseline.py --dataset longmemeval --limit 10
+```
+
+三个口径:
+
+| 通道 | 含义 |
+|---|---|
+| `raw_bge_m3` | 裸 BGE-M3 KNN,严格 top-10 |
+| `smilex_recall` | 融合排名前 10 个 source(与 raw 同口径) |
+| `smilex_recall_all` | recall 实际返回的全部 source(双通道去重后 ~2×10) |
+
+LoCoMo conv-26(152 题)实测:
+
+```
+raw_bge_m3      Overall 130/150 = 86.7 %
+smilex_recall   Overall 145/150 = 96.7 %   (top-10 同口径,+10.0pt)
+smilex_recall_all Overall 147/150 = 98.0 %
+```
+
+(分题型 raw→smilex top-10:multi_hop 78.1→90.6,temporal 91.9→100.0,
+open_domain 81.8→90.9,single_hop 88.6→98.6;category 映射 1=multi_hop 2=temporal
+3=open_domain 4=single_hop,以 mem0 实现为准)
+
+命中判定:LongMemEval 按 gold `answer_session_ids`(检索结果含任一 gold
+session 的块即命中),LoCoMo 按 gold `evidence`(dia_id 粒度;adversarial
+题语义为"不可回答",不计入)。结果存
+`benchmarks/retrieval_baseline/results/`。
+
+注意:macOS MPS 连跑多个 LongMemEval 样本时可能触发 Metal 命令挂起
+(卡在 Loading weights 之后),可用 `--device cpu` 绕过(慢但稳)。
+
+## mem0 兼容口径 benchmark(`benchmarks/mem0_compat/`)
+
+为使分数可直接与 mem0 公布的 LoCoMo 92.5 / LongMemEval 94.4 对比,
+按 [mem0ai/memory-benchmarks](https://github.com/mem0ai/memory-benchmarks)
+的评测协议逐项对齐实现了一套独立 runner。与自家严口径 benchmark 的根本
+差异是**判分哲学**:mem0 禁止拒答 + 判卷宽松(部分正确即对、语义改写即对、
+日期 ±14 天容忍);自家口径奖励拒答 + 严格语义等价。两套并存,报告时注明口径。
+
+```bash
+export OPENAI_API_KEY=...  # 同 longmemeval 约定(默认 GLM 环境变量体系)
+
+# LoCoMo mem0 口径(categories 1-4 全量,adversarial 不计分)
+uv run python benchmarks/mem0_compat/locomo.py --conversations 0 --max-qa 2  # 冒烟
+uv run python benchmarks/mem0_compat/locomo.py --resume                      # 全量
+
+# LongMemEval mem0 口径(默认每题型 5 题分层采样 seed=42,共 30 题)
+uv run python benchmarks/mem0_compat/longmemeval.py --per-type 1   # 冒烟 6 题
+uv run python benchmarks/mem0_compat/longmemeval.py                # mem0 默认 30 题
+uv run python benchmarks/mem0_compat/longmemeval.py --all-questions --source cleaned
+```
+
+与 mem0 协议的对齐项:
+
+| 项 | mem0 官方 | 本 runner |
+|---|---|---|
+| LoCoMo 题目范围 | categories 1-4(排除 adversarial) | 相同 |
+| LoCoMo gold 预处理 | category 3 取分号前第一段 | 相同 |
+| 采样(LME) | 每题型 5 题 seed=42 | 相同(`--per-type/--seed`) |
+| 检索 | top-200 一次取全 | 相同(`recall top_k=200`) |
+| 截断点 | cutoffs 10/20/50/200 各评一次 | 相同 |
+| 记忆呈现 | 时间序、不显示 score | 相同(session 日期锚定 time_range) |
+| 作答/判卷 prompt | mem0 官方原文 | 逐字移植(`mem0_prompts.py`) |
+| headline 指标 | 最大 cutoff(200) | 相同 |
+| 作答/判卷模型 | gpt-5 / gpt-5 | GLM 环境变量约定(比较时注意差异) |
+| 记忆形成 | LLM 抽取事实卡片 | 原文分层存储(BGE-M3+FTS5,被测系统本身) |
+
+其他说明:
+
+- LongMemEval 数据源 `--source original`(默认,与历史连续)/ `cleaned`
+  (mem0 用的 `longmemeval-cleaned` 社区修正版,自动下载)
+- LoCoMo category 映射以 mem0 实现为准(与论文编号不同):
+  1=multi-hop 2=temporal 3=open-domain 4=single-hop 5=adversarial
+- checkpoint 支持 `--resume`(LoCoMo 按 conv+qidx,LME 按 question_id)
+- 结果存 `benchmarks/mem0_compat/results/`
+
 ## 设计文档
 
 - [架构整合](docs/design/agent-memory-design.md) — 主架构 spec/contract

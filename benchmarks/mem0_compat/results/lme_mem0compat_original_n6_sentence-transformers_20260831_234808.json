@@ -1,0 +1,209 @@
+{
+  "report": "=== LongMemEval mem0 兼容口径(source=original) — smilex-ai-memory(embedder=sentence-transformers) ===\nanswerer=glm-5.3-flash judge=glm-5.3-flash (mem0 官方为 gpt-5/gpt-5,比较时注意)\n\n== cutoff 10 — n=6, Overall=83.3 % ==\n    knowledge-update           1 题  100.0 %\n    multi-session              1 题  0.0 %\n    single-session-assistant   1 题  100.0 %\n    single-session-preference   1 题  100.0 %\n    single-session-user        1 题  100.0 %\n    temporal-reasoning         1 题  100.0 %\n\n== cutoff 20 — n=6, Overall=50.0 % ==\n    knowledge-update           1 题  0.0 %\n    multi-session              1 题  0.0 %\n    single-session-assistant   1 题  100.0 %\n    single-session-preference   1 题  100.0 %\n    single-session-user        1 题  100.0 %\n    temporal-reasoning         1 题  0.0 %\n\n== cutoff 50 — n=6, Overall=83.3 % ==\n    knowledge-update           1 题  100.0 %\n    multi-session              1 题  0.0 %\n    single-session-assistant   1 题  100.0 %\n    single-session-preference   1 题  100.0 %\n    single-session-user        1 题  100.0 %\n    temporal-reasoning         1 题  100.0 %\n\n== cutoff 200 (headline) — n=6, Overall=83.3 % ==\n    knowledge-update           1 题  100.0 %\n    multi-session              1 题  0.0 %\n    single-session-assistant   1 题  100.0 %\n    single-session-preference   1 题  100.0 %\n    single-session-user        1 题  100.0 %\n    temporal-reasoning         1 题  100.0 %\n\nTotal Time 9.8 min",
+  "records": [
+    {
+      "qid": "18bc8abd",
+      "question_type": "knowledge-update",
+      "question": "What brand of BBQ sauce am I currently obsessed with?",
+      "gold": "Kansas City Masterpiece",
+      "cutoffs": {
+        "10": true,
+        "20": false,
+        "50": true,
+        "200": true
+      },
+      "results": {
+        "10": {
+          "answer": "You're currently obsessed with **Kansas City Masterpiece BBQ sauce**, which you love on your ribs. (This replaced Sweet Baby Ray's, your earlier favorite.)",
+          "correct": true,
+          "label": "yes"
+        },
+        "20": {
+          "answer": "",
+          "correct": false,
+          "label": "no"
+        },
+        "50": {
+          "answer": "You're currently obsessed with **Kansas City Masterpiece BBQ sauce** — you mentioned using it on your ribs and that it's your current favorite (as of late June).",
+          "correct": true,
+          "label": "yes"
+        },
+        "200": {
+          "answer": "You're currently obsessed with **Kansas City Masterpiece BBQ sauce** — you mentioned using it on your ribs (from our June 30, 2023 conversation). Before that, your favorite was Sweet Baby Ray's, so your go-to has since changed.",
+          "correct": true,
+          "label": "yes"
+        }
+      }
+    },
+    {
+      "qid": "0a995998",
+      "question_type": "multi-session",
+      "question": "How many items of clothing do I need to pick up or return from a store?",
+      "gold": "3",
+      "cutoffs": {
+        "10": false,
+        "20": false,
+        "50": false,
+        "200": false
+      },
+      "results": {
+        "10": {
+          "answer": "You have **2 items** of clothing to pick up:\n\n1. Your **navy blue blazer** — still at the dry cleaner's\n2. The **new pair of boots from Zara** — from the exchange you made on 2/5\n\n(The exchange/return part is already done; you just need to grab the new boots.)",
+          "correct": false,
+          "label": "<judge_thinking>Correct answer is 3; model says 2 items and contradicts the coun"
+        },
+        "20": {
+          "answer": "You have **2 items** of clothing to pick up:\n\n1. **Your dry cleaning** — the navy blue blazer you wore to a meeting a few weeks ago.\n2. **The new pair of boots** from the Zara exchange you made on 2/5.",
+          "correct": false,
+          "label": "no"
+        },
+        "50": {
+          "answer": "You have **2 items of clothing** to pick up:\n\n1. **Your dry cleaning** — the navy blue blazer you wore to a meeting a few weeks ago\n2. **The new pair of boots from Zara** — you exchanged them (bought Feb 5th, too small) for a larger size, but haven't picked them up yet\n\n(Note: the green sweater you lent to your sister doesn't count, since that's with her, not a store.)",
+          "correct": false,
+          "label": "no"
+        },
+        "200": {
+          "answer": "You have **2 items** to pick up:\n1. Your **navy blue blazer** from the dry cleaner (worn to a meeting a few weeks ago)\n2. Your **new pair of boots from Zara** (you exchanged the too-small pair on Feb 5 and still haven't picked up the larger size)",
+          "correct": false,
+          "label": "no"
+        }
+      }
+    },
+    {
+      "qid": "e3fc4d6e",
+      "question_type": "single-session-assistant",
+      "question": "I wanted to follow up on our previous conversation about the fusion breakthrough at Lawrence Livermore National Laboratory. Can you remind me who is the President's Chief Advisor for Science and Technology mentioned in the article?",
+      "gold": "Dr. Arati Prabhakar",
+      "cutoffs": {
+        "10": true,
+        "20": true,
+        "50": true,
+        "200": true
+      },
+      "results": {
+        "10": {
+          "answer": "The President's Chief Advisor for Science and Technology mentioned in the article is **Dr. Arati Prabhakar**. She also serves as Director of the White House Office of Science and Technology Policy. In the article, she commented on the fusion ignition milestone at Lawrence Livermore National Laboratory, noting that \"Monday, December 5, 2022, was a historic day in science\" and that the breakthrough \"opened a new chapter in NNSA's Stockpile Stewardship Program.\"",
+          "correct": true,
+          "label": "yes"
+        },
+        "20": {
+          "answer": "The President's Chief Advisor for Science and Technology mentioned in the article is **Dr. Arati Prabhakar**, who also serves as Director of the White House Office of Science and Technology Policy. She commented on the fusion ignition milestone achieved at LLNL's National Ignition Facility on December 5, 2022.",
+          "correct": true,
+          "label": "yes"
+        },
+        "50": {
+          "answer": "According to the article about the fusion breakthrough at Lawrence Livermore National Laboratory, the President's Chief Advisor for Science and Technology is **Dr. Arati Prabhakar**, who also serves as Director of the White House Office of Science and Technology Policy.",
+          "correct": true,
+          "label": "yes"
+        },
+        "200": {
+          "answer": "Based on the article we discussed on May 26th, the President's Chief Advisor for Science and Technology is **Dr. Arati Prabhakar**, who also serves as Director of the White House Office of Science and Technology Policy. She commented on the fusion ignition milestone achieved at LLNL's National Ignition Facility, noting that while the theoretical understanding of fusion has existed for over a century, \"the journey from knowing to doing can be long and arduous.\"",
+          "correct": true,
+          "label": "yes"
+        }
+      }
+    },
+    {
+      "qid": "1c0ddc50",
+      "question_type": "single-session-preference",
+      "question": "Can you suggest some activities I can do during my commute to work?",
+      "gold": "The user would prefer suggestions related to listening to new podcasts or audiobooks, especially the genre beyond true crime or self-improvement, such as history. They may not be interested in activities that require visual attention, such as reading or watching videos, as they are commuting. The user would not prefer general podcast topics such as true crime or self-improvement, as the user wants to explore other topics.",
+      "cutoffs": {
+        "10": true,
+        "20": true,
+        "50": true,
+        "200": true
+      },
+      "results": {
+        "10": {
+          "answer": "Based on what you've shared, here are some commute activities tailored to you:\n\n**Podcasts (your go-to already!):**\n- Keep up with *How I Built This* — you said it's been inspiring for the entrepreneur stories\n- Follow the history podcast schedule we set up: alternate *Hardcore History*, *Lore*, and *The Dollop* through the week, picking ~30–60 min episodes to fit your ~40-minute commute each way\n\n**Other options:**\n- **Audiobooks** for when you want a change from podcasts\n- **Mental prep** — use part of the ride to prioritize your tasks and plan your day (especially helpful given your deadline concerns)\n- **Calming audio or guided breathing** — since you've been dealing with anxiety lately, starting the morning with something relaxing could help\n- **Music/playlists** to motivate or unwind\n\nSince you mentioned wasting time on email and social media during your commute, I'd steer clear of those and stick to listening-based activities. And if you're on the new bike, keep the volume low and stay aware of traffic!",
+          "correct": true,
+          "label": "yes"
+        },
+        "20": {
+          "answer": "Based on your commute (about 40 minutes each way) and what you've shared, here are some personalized suggestions:\n\n**Podcasts (your current favorite!):**\n- Continue with \"How I Built This\" — you already love it\n- Try the history podcasts you wanted to branch out into: Hardcore History, Lore, or The Dollop. You could even alternate them across the week so episodes don't pile up\n\n**Self-care on the go:**\n- Since you've been dealing with anxiety, try mindful breathing or a short guided meditation during your ride (apps like Headspace or Calm) — especially useful on the bus where you don't need your hands\n\n**Other productive options:**\n- Audiobooks\n- Mental preparation: plan your day's tasks and priorities before you arrive\n- Language learning apps if you want something new\n\n**One tip:** You mentioned wasting time on email and social media during your commute — swapping that for podcasts or breathing exercises would be an easy win.\n\nAnd once your new hybrid bike arrives, just keep the volume low and stay aware of traffic!",
+          "correct": true,
+          "label": "yes"
+        },
+        "50": {
+          "answer": "Based on your commute (~40 min each way, currently by bus, with plans to bike), here are some personalized suggestions:\n\n**Podcasts** (your current go-to):\n- Keep up \"How I Built This\" — you said you find it inspiring\n- Branch into history podcasts since you wanted new genres: try alternating Hardcore History, Lore, and The Dollop across days of the week to avoid burnout\n\n**Other productive options:**\n- Audiobooks (Audible, Scribd)\n- Language learning apps like Duolingo\n- Catching up on news or industry updates\n- Mental prep: reviewing your tasks and priorities for the day (especially useful since you're most productive 9:00 am–12:00 pm)\n\n**Entertainment:**\n- Music playlists to energize your morning\n\n**A few notes:**\n- You mentioned wasting time on email and social media during your commute — replacing that with podcasts or day-planning is an easy win\n- Once you start biking, save the deep-listening content for the bus and use the ride for mental planning or music, keeping volume low for safety awareness",
+          "correct": true,
+          "label": "yes"
+        },
+        "200": {
+          "answer": "Based on what I know about your commute (about 40 minutes each way, soon to be by bike once you get your new one), here are some activities that fit your habits and interests:\n\n**Podcasts** — you already listen during your commute, so lean into it:\n- You mentioned wanting to branch out from true crime/self-improvement into history and science. Try **Hardcore History**, **Lore**, **The Dollop**, **StarTalk Radio**, **Radiolab**, or **Stuff You Should Know** — you could rotate them (e.g., history Mon/Tue, science midweek).\n- Keep up with **\"How I Built This\"** since it's been inspiring you.\n\n**Music** — add movie soundtrack tracks to your existing Spotify playlist. Scores like **Interstellar**, **Inception**, and **The Dark Knight** are great for focused, energized listening.\n\n**Audiobooks** — a good fit for the 40-minute ride; apps like Audible or Scribd work well.\n\n**Mental preparation** — use part of the ride to review your tasks and prioritize your day (helpful given your busy project deadlines).\n\n**Language learning** — apps like Duolingo or Babbel can fill short stretches productively.\n\nOne safety note for when you switch to biking: keep the volume low enough to stay aware of traffic, and consider a bike-mounted phone holder for easy control.",
+          "correct": true,
+          "label": "yes"
+        }
+      }
+    },
+    {
+      "qid": "6b168ec8",
+      "question_type": "single-session-user",
+      "question": "How many bikes do I own?",
+      "gold": "three",
+      "cutoffs": {
+        "10": true,
+        "20": true,
+        "50": true,
+        "200": true
+      },
+      "results": {
+        "10": {
+          "answer": "You own **3 bikes**: a road bike, a mountain bike, and a commuter bike.",
+          "correct": true,
+          "label": "yes"
+        },
+        "20": {
+          "answer": "You own **three bikes**: a road bike, a mountain bike, and a commuter bike.",
+          "correct": true,
+          "label": "yes"
+        },
+        "50": {
+          "answer": "You own **three bikes**: a road bike, a mountain bike, and a commuter bike (as you mentioned on May 27, 2023).",
+          "correct": true,
+          "label": "yes"
+        },
+        "200": {
+          "answer": "You own **three bikes**:\n1. A road bike (your Trek Emonda)\n2. A mountain bike\n3. A commuter bike",
+          "correct": true,
+          "label": "yes"
+        }
+      }
+    },
+    {
+      "qid": "gpt4_2655b836",
+      "question_type": "temporal-reasoning",
+      "question": "What was the first issue I had with my new car after its first service?",
+      "gold": "GPS system not functioning correctly",
+      "cutoffs": {
+        "10": true,
+        "20": false,
+        "50": true,
+        "200": true
+      },
+      "results": {
+        "10": {
+          "answer": "The first issue you had after your car's first service (on March 15th) was a problem with the GPS system, which occurred on March 22nd. You had to take it back to the dealership, where they replaced the entire GPS system — and it's been working flawlessly since.",
+          "correct": true,
+          "label": "yes"
+        },
+        "20": {
+          "answer": "The first issue you had after your car's first service (March 15th) was a problem with the GPS system, which occurred on March 22nd. You had to take it back to the dealership, and they replaced the entire GPS system — it's been working flawlessly since then.",
+          "correct": false,
+          "label": "<judge_thinking>The core claim: first post-service issue was GPS not working cor"
+        },
+        "50": {
+          "answer": "The first issue you had after your first service (done March 15th) was with your car's GPS system. On March 22nd, you had to take it back to the dealership, and they replaced the entire GPS system — and it's been working flawlessly since.",
+          "correct": true,
+          "label": "yes"
+        },
+        "200": {
+          "answer": "The first issue you had after your car's first service was with the **GPS system**.\n\nHere's the timeline from your memories:\n- **March 15, 2023**: You got your silver Honda Civic serviced for the first time (which went well).\n- **March 22, 2023** (one week later): The GPS system malfunctioned, so you took the car back to the dealership. They replaced the entire GPS system, and it's been working flawlessly since then.",
+          "correct": true,
+          "label": "yes"
+        }
+      }
+    }
+  ]
+}

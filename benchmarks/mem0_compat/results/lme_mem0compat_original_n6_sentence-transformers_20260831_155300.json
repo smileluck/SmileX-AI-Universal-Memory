@@ -1,0 +1,209 @@
+{
+  "report": "=== LongMemEval mem0 兼容口径(source=original) — smilex-ai-memory(embedder=sentence-transformers) ===\nanswerer=glm-4.5-flash judge=glm-4.5-flash (mem0 官方为 gpt-5/gpt-5,比较时注意)\n\n== cutoff 10 — n=6, Overall=66.7 % ==\n    knowledge-update           1 题  100.0 %\n    multi-session              1 题  0.0 %\n    single-session-assistant   1 题  100.0 %\n    single-session-preference   1 题  0.0 %\n    single-session-user        1 题  100.0 %\n    temporal-reasoning         1 题  100.0 %\n\n== cutoff 20 — n=6, Overall=83.3 % ==\n    knowledge-update           1 题  100.0 %\n    multi-session              1 题  0.0 %\n    single-session-assistant   1 题  100.0 %\n    single-session-preference   1 题  100.0 %\n    single-session-user        1 题  100.0 %\n    temporal-reasoning         1 题  100.0 %\n\n== cutoff 50 — n=6, Overall=66.7 % ==\n    knowledge-update           1 题  100.0 %\n    multi-session              1 题  0.0 %\n    single-session-assistant   1 题  100.0 %\n    single-session-preference   1 题  100.0 %\n    single-session-user        1 题  100.0 %\n    temporal-reasoning         1 题  0.0 %\n\n== cutoff 200 (headline) — n=6, Overall=66.7 % ==\n    knowledge-update           1 题  100.0 %\n    multi-session              1 题  0.0 %\n    single-session-assistant   1 题  100.0 %\n    single-session-preference   1 题  0.0 %\n    single-session-user        1 题  100.0 %\n    temporal-reasoning         1 题  100.0 %\n\nTotal Time 64.7 min",
+  "records": [
+    {
+      "qid": "18bc8abd",
+      "question_type": "knowledge-update",
+      "question": "What brand of BBQ sauce am I currently obsessed with?",
+      "gold": "Kansas City Masterpiece",
+      "cutoffs": {
+        "10": true,
+        "20": true,
+        "50": true,
+        "200": true
+      },
+      "results": {
+        "10": {
+          "answer": "Kansas City Masterpiece BBQ sauce.",
+          "correct": true,
+          "label": "yes"
+        },
+        "20": {
+          "answer": "Kansas City Masterpiece BBQ sauce.",
+          "correct": true,
+          "label": "yes"
+        },
+        "50": {
+          "answer": "Kansas City Masterpiece BBQ sauce.",
+          "correct": true,
+          "label": "yes"
+        },
+        "200": {
+          "answer": "Based on the memories, you are currently obsessed with Kansas City Masterpiece BBQ sauce. You mentioned this multiple times in your conversation about planning a backyard BBQ, specifically noting that you're obsessed with it on your ribs and that it's your current favorite.",
+          "correct": true,
+          "label": "yes"
+        }
+      }
+    },
+    {
+      "qid": "0a995998",
+      "question_type": "multi-session",
+      "question": "How many items of clothing do I need to pick up or return from a store?",
+      "gold": "3",
+      "cutoffs": {
+        "10": false,
+        "20": false,
+        "50": false,
+        "200": false
+      },
+      "results": {
+        "10": {
+          "answer": "You need to pick up 2 items: a new pair of boots from Zara and your navy blue blazer from dry cleaning.",
+          "correct": false,
+          "label": "no"
+        },
+        "20": {
+          "answer": "You need to pick up or return 2 items: a new pair of boots from Zara and your dry cleaning for the navy blue blazer.",
+          "correct": false,
+          "label": "no"
+        },
+        "50": {
+          "answer": "You need to pick up or return 2 items:\n1. Dry cleaning for your navy blue blazer\n2. New boots from Zara (after exchanging the previous pair on 2/5)",
+          "correct": false,
+          "label": "no"
+        },
+        "200": {
+          "answer": "Based on the memories, you need to pick up or return 2 items of clothing:\n\n1. A new pair of boots from Zara that you exchanged for a larger size (you need to pick these up)\n2. Your navy blue blazer from the dry cleaner (you need to pick this up)\n\nThese are the only clothing items mentioned in your memories that require pickup or return from a store.",
+          "correct": false,
+          "label": "no"
+        }
+      }
+    },
+    {
+      "qid": "e3fc4d6e",
+      "question_type": "single-session-assistant",
+      "question": "I wanted to follow up on our previous conversation about the fusion breakthrough at Lawrence Livermore National Laboratory. Can you remind me who is the President's Chief Advisor for Science and Technology mentioned in the article?",
+      "gold": "Dr. Arati Prabhakar",
+      "cutoffs": {
+        "10": true,
+        "20": true,
+        "50": true,
+        "200": true
+      },
+      "results": {
+        "10": {
+          "answer": "Dr. Arati Prabhakar is the President's Chief Advisor for Science and Technology mentioned in the article.",
+          "correct": true,
+          "label": "yes"
+        },
+        "20": {
+          "answer": "Dr. Arati Prabhakar is the President's Chief Advisor for Science and Technology and Director of the White House Office of Science and Technology Policy, as mentioned in the article about the fusion breakthrough.",
+          "correct": true,
+          "label": "yes"
+        },
+        "50": {
+          "answer": "Dr. Arati Prabhakar is the President's Chief Advisor for Science and Technology mentioned in the article about the fusion breakthrough at Lawrence Livermore National Laboratory.",
+          "correct": true,
+          "label": "yes"
+        },
+        "200": {
+          "answer": "Dr. Arati Prabhakar is the President's Chief Advisor for Science and Technology mentioned in the article about the fusion breakthrough at Lawrence Livermore National Laboratory. She also serves as the Director of the White House Office of Science and Technology Policy.",
+          "correct": true,
+          "label": "yes"
+        }
+      }
+    },
+    {
+      "qid": "1c0ddc50",
+      "question_type": "single-session-preference",
+      "question": "Can you suggest some activities I can do during my commute to work?",
+      "gold": "The user would prefer suggestions related to listening to new podcasts or audiobooks, especially the genre beyond true crime or self-improvement, such as history. They may not be interested in activities that require visual attention, such as reading or watching videos, as they are commuting. The user would not prefer general podcast topics such as true crime or self-improvement, as the user wants to explore other topics.",
+      "cutoffs": {
+        "10": false,
+        "20": true,
+        "50": true,
+        "200": false
+      },
+      "results": {
+        "10": {
+          "answer": "Based on your interests, here are some activities you can do during your commute:\n\n1. Podcasts - You already enjoy \"How I Built This\" and have shown interest in history podcasts\n2. Audiobooks - Great for longer commutes\n3. Language learning apps - Use your commute time productively\n4. Music playlists - Create motivating or relaxing playlists for your bike ride\n5. News updates - Catch up on current events\n\nSince you have a 40-minute commute each way, podcasts would be particularly suitable as they match your listening preferences and commute duration.",
+          "correct": false,
+          "label": "no"
+        },
+        "20": {
+          "answer": "Based on your 40-minute commute, here are some activities you can do:\n\n1. **Podcast listening**: You've enjoyed podcasts before, especially \"How I Built This.\" Since you're interested in branching out from true crime and self-improvement, consider history podcasts like \"Hardcore History,\" \"Lore,\" or \"The Dollop\" as you mentioned wanting to explore.\n\n2. **Audiobooks**: Perfect for longer commutes and can help you dive into books you might not have time for otherwise.\n\n3. **Language learning**: Use apps like Duolingo or Babbel to practice a language during your commute.\n\n4. **News updates**: Catch up on current events with news podcasts or apps.\n\n5. **Mental preparation**: Use the time to plan your day, prioritize tasks, or mentally prepare for meetings.\n\nRemember to keep the volume low if you're biking to stay aware of your surroundings for safety.",
+          "correct": true,
+          "label": "yes"
+        },
+        "50": {
+          "answer": "Based on your 40-minute commute, here are some activities you can do:\n\n1. **Listen to podcasts** - Since you already enjoy this, try branching out to history podcasts like \"Hardcore History,\" \"Lore,\" or \"The Dollop\" as mentioned in our conversation.\n\n2. **Audiobooks** - Perfect for longer commutes, especially if you want to dive into a book.\n\n3. **Language learning** - Use apps like Duolingo or Babbel during your commute to improve language skills.\n\n4. **Mental preparation** - Use the time to plan your day, prioritize tasks, or mentally prepare for meetings.\n\n5. **News updates** - Catch up on industry news or current events through news podcasts or apps.\n\nSince you've been enjoying podcasts, expanding into different genres like history would be a natural next step for your commute time.",
+          "correct": true,
+          "label": "yes"
+        },
+        "200": {
+          "answer": "Based on your 40-minute commute and your interest in podcasts, here are some activities you could try:\n\n**Podcasts & Audiobooks:**\n- Continue listening to \"How I Built This\" and other entrepreneur-focused podcasts\n- Try history podcasts like \"Hardcore History\" or \"Lore\" that you mentioned interest in\n- Listen to audiobooks on topics you enjoy\n- Try language learning podcasts if you want to learn a new language\n\n**Productivity:**\n- Plan your day or week ahead\n- Review and respond to emails (if you can do this safely)\n- Create to-do lists for work or personal tasks\n- Listen to educational content related to your field\n\n**Relaxation:**\n- Practice mindfulness or meditation\n- Listen to calming music or nature sounds\n- Do light stretching exercises (if you're not driving)\n\n**Interactive:**\n- Use voice commands on your phone if you have a smart assistant\n- Play brain games or trivia apps\n- Learn something new with short educational apps\n\nWhat type of activities interest you most for your commute?",
+          "correct": false,
+          "label": "no"
+        }
+      }
+    },
+    {
+      "qid": "6b168ec8",
+      "question_type": "single-session-user",
+      "question": "How many bikes do I own?",
+      "gold": "three",
+      "cutoffs": {
+        "10": true,
+        "20": true,
+        "50": true,
+        "200": true
+      },
+      "results": {
+        "10": {
+          "answer": "You own 3 bikes: a road bike, a mountain bike, and a commuter bike.",
+          "correct": true,
+          "label": "yes"
+        },
+        "20": {
+          "answer": "You own 3 bikes: a road bike, a mountain bike, and a commuter bike.",
+          "correct": true,
+          "label": "yes"
+        },
+        "50": {
+          "answer": "You own 3 bikes: a road bike, a mountain bike, and a commuter bike.",
+          "correct": true,
+          "label": "yes"
+        },
+        "200": {
+          "answer": "You own 3 bikes: a road bike, a mountain bike, and a commuter bike.",
+          "correct": true,
+          "label": "yes"
+        }
+      }
+    },
+    {
+      "qid": "gpt4_2655b836",
+      "question_type": "temporal-reasoning",
+      "question": "What was the first issue I had with my new car after its first service?",
+      "gold": "GPS system not functioning correctly",
+      "cutoffs": {
+        "10": true,
+        "20": true,
+        "50": false,
+        "200": true
+      },
+      "results": {
+        "10": {
+          "answer": "Your first issue with your new car after its first service was a GPS system problem on March 22nd, which required you to take it back to the dealership for repair. They replaced the entire system and resolved the issue.",
+          "correct": true,
+          "label": "yes"
+        },
+        "20": {
+          "answer": "The first issue you had with your new car after its first service was the GPS system issue on March 22nd, which required taking the car back to the dealership for repair.",
+          "correct": true,
+          "label": "yes"
+        },
+        "50": {
+          "answer": "I don't have information about any issues you had with your new car after its first service in my memories. The only mention of your first service was that it was a \"great experience\" on March 15th, but there's no record of problems that occurred afterward.",
+          "correct": false,
+          "label": "no"
+        },
+        "200": {
+          "answer": "",
+          "correct": true,
+          "label": "yes"
+        }
+      }
+    }
+  ]
+}

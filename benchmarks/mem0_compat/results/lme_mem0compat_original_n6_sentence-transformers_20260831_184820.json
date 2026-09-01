@@ -1,0 +1,209 @@
+{
+  "report": "=== LongMemEval mem0 兼容口径(source=original) — smilex-ai-memory(embedder=sentence-transformers) ===\nanswerer=glm-5.3-flash judge=glm-4.5-flash (mem0 官方为 gpt-5/gpt-5,比较时注意)\n\n== cutoff 10 — n=6, Overall=83.3 % ==\n    knowledge-update           1 题  100.0 %\n    multi-session              1 题  100.0 %\n    single-session-assistant   1 题  0.0 %\n    single-session-preference   1 题  100.0 %\n    single-session-user        1 题  100.0 %\n    temporal-reasoning         1 题  100.0 %\n\n== cutoff 20 — n=6, Overall=50.0 % ==\n    knowledge-update           1 题  100.0 %\n    multi-session              1 题  0.0 %\n    single-session-assistant   1 题  0.0 %\n    single-session-preference   1 题  0.0 %\n    single-session-user        1 题  100.0 %\n    temporal-reasoning         1 题  100.0 %\n\n== cutoff 50 — n=6, Overall=66.7 % ==\n    knowledge-update           1 题  100.0 %\n    multi-session              1 题  0.0 %\n    single-session-assistant   1 题  0.0 %\n    single-session-preference   1 题  100.0 %\n    single-session-user        1 题  100.0 %\n    temporal-reasoning         1 题  100.0 %\n\n== cutoff 200 (headline) — n=6, Overall=50.0 % ==\n    knowledge-update           1 题  0.0 %\n    multi-session              1 题  0.0 %\n    single-session-assistant   1 题  0.0 %\n    single-session-preference   1 题  100.0 %\n    single-session-user        1 题  100.0 %\n    temporal-reasoning         1 题  100.0 %\n\nTotal Time 25.7 min",
+  "records": [
+    {
+      "qid": "18bc8abd",
+      "question_type": "knowledge-update",
+      "question": "What brand of BBQ sauce am I currently obsessed with?",
+      "gold": "Kansas City Masterpiece",
+      "cutoffs": {
+        "10": true,
+        "20": true,
+        "50": true,
+        "200": false
+      },
+      "results": {
+        "10": {
+          "answer": "",
+          "correct": true,
+          "label": "yes"
+        },
+        "20": {
+          "answer": "",
+          "correct": true,
+          "label": "yes"
+        },
+        "50": {
+          "answer": "",
+          "correct": true,
+          "label": "yes"
+        },
+        "200": {
+          "answer": "",
+          "correct": false,
+          "label": "no"
+        }
+      }
+    },
+    {
+      "qid": "0a995998",
+      "question_type": "multi-session",
+      "question": "How many items of clothing do I need to pick up or return from a store?",
+      "gold": "3",
+      "cutoffs": {
+        "10": true,
+        "20": false,
+        "50": false,
+        "200": false
+      },
+      "results": {
+        "10": {
+          "answer": "",
+          "correct": true,
+          "label": "yes"
+        },
+        "20": {
+          "answer": "",
+          "correct": false,
+          "label": "no"
+        },
+        "50": {
+          "answer": "",
+          "correct": false,
+          "label": "no"
+        },
+        "200": {
+          "answer": "",
+          "correct": false,
+          "label": "no"
+        }
+      }
+    },
+    {
+      "qid": "e3fc4d6e",
+      "question_type": "single-session-assistant",
+      "question": "I wanted to follow up on our previous conversation about the fusion breakthrough at Lawrence Livermore National Laboratory. Can you remind me who is the President's Chief Advisor for Science and Technology mentioned in the article?",
+      "gold": "Dr. Arati Prabhakar",
+      "cutoffs": {
+        "10": false,
+        "20": false,
+        "50": false,
+        "200": false
+      },
+      "results": {
+        "10": {
+          "answer": "",
+          "correct": false,
+          "label": "no"
+        },
+        "20": {
+          "answer": "",
+          "correct": false,
+          "label": "no"
+        },
+        "50": {
+          "answer": "",
+          "correct": false,
+          "label": "no"
+        },
+        "200": {
+          "answer": "",
+          "correct": false,
+          "label": "no"
+        }
+      }
+    },
+    {
+      "qid": "1c0ddc50",
+      "question_type": "single-session-preference",
+      "question": "Can you suggest some activities I can do during my commute to work?",
+      "gold": "The user would prefer suggestions related to listening to new podcasts or audiobooks, especially the genre beyond true crime or self-improvement, such as history. They may not be interested in activities that require visual attention, such as reading or watching videos, as they are commuting. The user would not prefer general podcast topics such as true crime or self-improvement, as the user wants to explore other topics.",
+      "cutoffs": {
+        "10": true,
+        "20": false,
+        "50": true,
+        "200": true
+      },
+      "results": {
+        "10": {
+          "answer": "",
+          "correct": true,
+          "label": "yes"
+        },
+        "20": {
+          "answer": "",
+          "correct": false,
+          "label": "no"
+        },
+        "50": {
+          "answer": "",
+          "correct": true,
+          "label": "yes"
+        },
+        "200": {
+          "answer": "",
+          "correct": true,
+          "label": "yes"
+        }
+      }
+    },
+    {
+      "qid": "6b168ec8",
+      "question_type": "single-session-user",
+      "question": "How many bikes do I own?",
+      "gold": "three",
+      "cutoffs": {
+        "10": true,
+        "20": true,
+        "50": true,
+        "200": true
+      },
+      "results": {
+        "10": {
+          "answer": "",
+          "correct": true,
+          "label": "yes"
+        },
+        "20": {
+          "answer": "",
+          "correct": true,
+          "label": "yes"
+        },
+        "50": {
+          "answer": "",
+          "correct": true,
+          "label": "yes"
+        },
+        "200": {
+          "answer": "",
+          "correct": true,
+          "label": "yes"
+        }
+      }
+    },
+    {
+      "qid": "gpt4_2655b836",
+      "question_type": "temporal-reasoning",
+      "question": "What was the first issue I had with my new car after its first service?",
+      "gold": "GPS system not functioning correctly",
+      "cutoffs": {
+        "10": true,
+        "20": true,
+        "50": true,
+        "200": true
+      },
+      "results": {
+        "10": {
+          "answer": "",
+          "correct": true,
+          "label": "yes"
+        },
+        "20": {
+          "answer": "",
+          "correct": true,
+          "label": "yes"
+        },
+        "50": {
+          "answer": "",
+          "correct": true,
+          "label": "yes"
+        },
+        "200": {
+          "answer": "",
+          "correct": true,
+          "label": "yes"
+        }
+      }
+    }
+  ]
+}

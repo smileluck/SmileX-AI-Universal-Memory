@@ -51,7 +51,7 @@ chunk_session_lme = _lme_ingest.chunk_session
 iter_sessions = _locomo_ingest.iter_sessions
 
 RESULTS_DIR = Path(__file__).parent / "results"
-LOCOMO_CATEGORIES = {1: "single_hop", 2: "multi_hop", 3: "temporal", 4: "open_domain"}
+LOCOMO_CATEGORIES = {1: "multi_hop", 2: "temporal", 3: "open_domain", 4: "single_hop"}
 MAX_CHUNK_CHARS = 2000  # 与两个 benchmark 的切法一致
 # 用于把 recall 上下文映射回切块的指纹长度(去掉 [date: ...] 前缀后取首 N 字符)
 FINGERPRINT_LEN = 120

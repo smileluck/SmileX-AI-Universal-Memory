@@ -46,7 +46,9 @@ class TokenCounter:
         if not text:
             return 0
         if self._mode == "tiktoken":
-            return len(self._enc.encode(text))
+            # disallowed_special=(): 文本中出现的 <|endoftext|> 等特殊 token 字面量
+            # 按普通文本编码计数,否则 encode 直接抛异常(计数不应因内容崩掉)
+            return len(self._enc.encode(text, disallowed_special=()))
         return max(1, len(text) // ESTIMATE_CHARS_PER_TOKEN)
 
     def count_memory(self, memory: FuzzyMemory) -> int:
