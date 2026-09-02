@@ -303,6 +303,12 @@ single-hop 仅 2 题),与 mem0 全量(~1540 题)口径有差异,仅供参考;
 - 接入: `MemoryMiddleware(reranker=get_reranker(RerankerConfig(backend="cross-encoder")))`
   或 config.toml `reranker = "cross-encoder"`
 - 对比验证: `uv run python benchmarks/retrieval_baseline/run_baseline.py --dataset locomo --rerank --skip-raw`
+- 实测(LoCoMo 全量 10 对话 1536 题,2026-09-02):
+  R@10 无精排 95.3% → 精排 **97.4%**(+2.1pp,四题型全涨:
+  multi_hop 94.7→96.5 / open_domain 79.3→83.7 / single_hop 97.7→99.0 /
+  temporal 94.1→97.8);全返回口径不变(98.5%,精排只改排序不改召回集)。
+  代价: 本机(MPS)约 4.4s/查询(50 候选),超出 recall P99 预算——
+  生产低延迟场景可减小 max_candidates 或换 reranker-base
 
 **写入时 LLM 事实抽取**(`[llm]` extra,OpenAI 兼容 API,core 保持零 LLM)
 - `FactExtractor` Protocol,默认 `PassThroughExtractor`(原 content 整块写入);
