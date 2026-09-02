@@ -107,7 +107,8 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
     path = Path(args.result_json)
-    if not path.is_absolute():
+    # 带目录分隔符的相对路径按 cwd 解析;纯文件名才默认 results/ 下
+    if not path.is_absolute() and "/" not in args.result_json:
         path = RESULTS_DIR / path
     if not path.exists():
         raise SystemExit(f"文件不存在: {path}")
