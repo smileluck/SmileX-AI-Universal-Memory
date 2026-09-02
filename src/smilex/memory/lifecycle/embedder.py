@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import math
+import re
 import struct
 from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
@@ -143,16 +144,24 @@ class SentenceTransformerEmbedder:
     def model_name(self) -> str:
         return self._model_name
 
+    # 语料里可能出现 "<|endoftext|>" 等特殊 token 字面量(如 LongMemEval 部分样本),
+    # HF tokenizer 默认拒绝编码;去掉尖括号按普通文本处理
+    _SPECIAL_TOKEN_RE = re.compile(r"<\|[^|<>]{0,32}\|>")
+
+    @classmethod
+    def _sanitize(cls, text: str) -> str:
+        return cls._SPECIAL_TOKEN_RE.sub(lambda m: m.group(0).replace("<", "").replace(">", ""), text)
+
     def embed(self, text: str) -> np.ndarray:
         model = self._load_model()
-        vec = model.encode(text, normalize_embeddings=True)
+        vec = model.encode(self._sanitize(text), normalize_embeddings=True)
         return np.asarray(vec, dtype=np.float32)
 
     def embed_batch(self, texts: list[str]) -> list[np.ndarray]:
         if not texts:
             return []
         model = self._load_model()
-        vecs = model.encode(texts, normalize_embeddings=True)
+        vecs = model.encode([self._sanitize(t) for t in texts], normalize_embeddings=True)
         return [np.asarray(v, dtype=np.float32) for v in vecs]
 
 

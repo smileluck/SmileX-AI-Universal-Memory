@@ -266,6 +266,33 @@ uv run python benchmarks/mem0_compat/longmemeval.py --all-questions --source cle
 | 作答/判卷模型 | gpt-5 / gpt-5 | GLM 环境变量约定(比较时注意差异) |
 | 记忆形成 | LLM 抽取事实卡片 | 原文分层存储(BGE-M3+FTS5,被测系统本身) |
 
+### LongMemEval 实测(mem0 口径,2026-09-01)
+
+`--per-type 5 --seed 42`(30 题,mem0 默认采样),answerer/judge = glm-5.3-flash:
+
+| cutoff | 10 | 20 | 50 | **200(headline)** |
+|---|---|---|---|---|
+| Overall | 90.0% | 96.7% | 86.7% | **93.3%** |
+
+mem0 官方(gpt-5 作答+判卷)headline 94.4%。本项目以 flash 级模型达到 93.3%,
+分题型仅 multi-session/knowledge-update 各 1 题未对。已知误差源:
+LongMemEval original 版部分题目 gold 标注歧义(如 multi-session 计数题把
+"从亲友处取回衣物"计入"店内取/退"),可用 `--source cleaned` 对照。
+
+### LoCoMo 实测(mem0 口径,2026-09-01)
+
+对话 0-2 各取前 30 题(共 90 题,answerer/judge = glm-5.3-flash):
+
+| cutoff | 10 | 20 | 50 | **200(headline)** |
+|---|---|---|---|---|
+| Overall | 97.8% | 97.8% | 98.9% | **98.9%** |
+
+分题型(headline):multi-hop 36/36、temporal 45/45、single-hop 2/2,
+仅 open-domain 5/7(85.7%)。mem0 官方(gpt-5)92.5%。
+注意:此为每对话前 30 题的采样(题型分布偏 temporal/multi-hop,
+single-hop 仅 2 题),与 mem0 全量(~1540 题)口径有差异,仅供参考;
+全量可 `uv run python benchmarks/mem0_compat/locomo.py --resume` 续跑。
+
 其他说明:
 
 - LongMemEval 数据源 `--source original`(默认,与历史连续)/ `cleaned`
