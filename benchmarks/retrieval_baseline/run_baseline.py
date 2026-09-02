@@ -193,6 +193,13 @@ async def run(args: argparse.Namespace) -> int:
 
     samples = load_lme(args.limit) if dataset == "longmemeval" else load_locomo(args.limit)
 
+    reranker = None
+    if args.rerank:
+        from smilex.memory.lifecycle.reranker import CrossEncoderReranker
+
+        reranker = CrossEncoderReranker(device=args.device)
+        print("cross-encoder 精排已启用(BAAI/bge-reranker-v2-m3,首次运行需下载 ~2.3GB)")
+
     # 统计: {channel: {qtype: [bool]}}
     stats: dict[str, dict[str, list[bool]]] = {
         "raw_bge_m3": defaultdict(list),
@@ -241,13 +248,6 @@ async def run(args: argparse.Namespace) -> int:
                     stats["raw_bge_m3"][qd["qtype"]].append(hit)
                 # smilex 通道
                 if mw is None:
-                    reranker = None
-                    if args.rerank:
-                        from smilex.memory.lifecycle.reranker import (
-                            CrossEncoderReranker,
-                        )
-                        reranker = CrossEncoderReranker(device=args.device)
-                        print("cross-encoder 精排已启用(BAAI/bge-reranker-v2-m3,首次运行需下载 ~2.3GB)")
                     mw = MemoryMiddleware(
                         Path(tmp.name) / "bench.db", embedder=embedder,
                         promotion_threshold=0, reranker=reranker,
