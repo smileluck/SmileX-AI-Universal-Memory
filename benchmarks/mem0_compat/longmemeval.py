@@ -151,9 +151,26 @@ async def _chat_answer(client, prompt: str) -> str:
 
 
 async def _chat_judge(client, prompt: str) -> str:
+    """判卷调用;输出里没有 yes/no 判定时(思考文本耗尽 max_tokens 被截断)
+    用更大预算 + 简化 prompt 重试一次,避免误记 0 分."""
+    import re as _re
+
     text, _ = await _llm.chat(
         client, _llm.judge_model(), "", prompt, max_tokens=512, disable_thinking=True
     )
+    has_verdict = bool(_re.search(r"\b(yes|no)\b", text.lower()))
+    if not has_verdict:
+        terse = (
+            prompt
+            + "\n\nAnswer with exactly one word (yes or no) after your thinking. "
+            "Keep the thinking under 100 words."
+        )
+        retry, _ = await _llm.chat(
+            client, _llm.judge_model(), "", terse,
+            max_tokens=2048, disable_thinking=True,
+        )
+        if _re.search(r"\b(yes|no)\b", retry.lower()):
+            return retry
     return text
 
 
