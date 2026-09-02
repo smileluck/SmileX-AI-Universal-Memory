@@ -47,6 +47,14 @@ Repository = "https://github.com/smileluck/SmileX-AI-Universal-Memory"
 embedding = [
     "sentence-transformers>=3.0",
 ]
+# 检索精排可选后端(bge-reranker-v2-m3);默认 NoopReranker 零依赖
+rerank = [
+    "sentence-transformers>=3.0",
+]
+# 写入时 LLM 事实抽取可选后端(OpenAI 兼容 API);默认 PassThroughExtractor 零依赖
+llm = [
+    "openai>=1.50",
+]
 # 服务化: MCP server + Web 面板(纯嵌入式库不需要)
 server = [
     "mcp>=1.9",

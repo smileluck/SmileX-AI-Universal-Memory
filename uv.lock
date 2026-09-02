@@ -3148,6 +3148,12 @@ dev = [
 embedding = [
     { name = "sentence-transformers" },
 ]
+llm = [
+    { name = "openai" },
+]
+rerank = [
+    { name = "sentence-transformers" },
+]
 server = [
     { name = "fastapi" },
     { name = "mcp" },
@@ -3167,6 +3173,7 @@ requires-dist = [
     { name = "networkx", specifier = ">=3.4" },
     { name = "numpy", specifier = ">=2.1" },
     { name = "openai", marker = "extra == 'benchmark'", specifier = ">=1.50" },
+    { name = "openai", marker = "extra == 'llm'", specifier = ">=1.50" },
     { name = "pydantic", specifier = ">=2.9" },
     { name = "pydantic-settings", specifier = ">=2.5" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.3" },
@@ -3176,12 +3183,13 @@ requires-dist = [
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.7" },
     { name = "sentence-transformers", marker = "extra == 'embedding'", specifier = ">=3.0" },
+    { name = "sentence-transformers", marker = "extra == 'rerank'", specifier = ">=3.0" },
     { name = "sqlite-vec", specifier = ">=0.1.6" },
     { name = "structlog", specifier = ">=24.4" },
     { name = "tiktoken", specifier = ">=0.8" },
     { name = "uvicorn", marker = "extra == 'server'", specifier = ">=0.32" },
 ]
-provides-extras = ["embedding", "server", "benchmark", "dev"]
+provides-extras = ["embedding", "rerank", "llm", "server", "benchmark", "dev"]
 
 [[package]]
 name = "sniffio"

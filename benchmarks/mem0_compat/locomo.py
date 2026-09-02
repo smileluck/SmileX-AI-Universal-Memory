@@ -72,14 +72,25 @@ def load_samples() -> list[dict]:
 
 
 async def ingest_conversation(
-    sample: dict, embedder, db_path: Path, progress: bool = False
+    sample: dict, embedder, db_path: Path, progress: bool = False,
+    fact_extraction: bool = False, rerank: bool = False, device: str | None = None,
 ) -> tuple[MemoryMiddleware, int, float, list[tuple[str, str]]]:
     """灌入一个对话,并回填 session 日期到 time_start(供时间序呈现).
+
+    fact_extraction: 写入时 LLM 原子事实抽取(SMILEX_EXTRACT_* 环境变量);
+    rerank: cross-encoder 精排(bge-reranker-v2-m3).
 
     Returns:
         (mw, 写入块数, 耗时秒, [(块文本, ISO 日期)] 供 anchor_times)
     """
-    mw = MemoryMiddleware(db_path, embedder=embedder, promotion_threshold=0)
+    kwargs = {}
+    if fact_extraction:
+        from smilex.memory.lifecycle.extractor import LLMFactExtractor
+        kwargs["fact_extractor"] = LLMFactExtractor()
+    if rerank:
+        from smilex.memory.lifecycle.reranker import CrossEncoderReranker
+        kwargs["reranker"] = CrossEncoderReranker(device=device)
+    mw = MemoryMiddleware(db_path, embedder=embedder, promotion_threshold=0, **kwargs)
     await mw.initialize()
     start = time.perf_counter()
     n = 0
@@ -161,7 +172,8 @@ async def run(args: argparse.Namespace) -> int:
     cats = {int(x) for x in args.categories.split(",")}
     cutoffs = [int(x) for x in args.cutoffs.split(",")]
 
-    ckpt_path = RESULTS_DIR / f"ckpt_locomo_mem0compat_{args.embedder}.jsonl"
+    variant = ("_fx" if args.fact_extraction else "") + ("_rr" if args.rerank else "")
+    ckpt_path = RESULTS_DIR / f"ckpt_locomo_mem0compat_{args.embedder}{variant}.jsonl"
     done: dict[tuple[int, int], dict] = {}
     if args.resume and ckpt_path.exists():
         for line in ckpt_path.open(encoding="utf-8"):
@@ -212,7 +224,9 @@ async def run(args: argparse.Namespace) -> int:
                     if mw is None:
                         tmp = tempfile.TemporaryDirectory(prefix="m0c_locomo_")
                         mw, n_chunks, ingest_s, _dated = await ingest_conversation(
-                            sample, embedder, Path(tmp.name) / "bench.db"
+                            sample, embedder, Path(tmp.name) / "bench.db",
+                            fact_extraction=args.fact_extraction,
+                            rerank=args.rerank, device=args.device,
                         )
                         rows = load_fragment_rows(Path(tmp.name) / "bench.db")
                         print(f"    ingest: {n_chunks} chunks / {ingest_s:.0f}s", flush=True)
@@ -291,6 +305,10 @@ def main() -> int:
                         choices=["sentence-transformers", "hash"])
     parser.add_argument("--device", default=None,
                         help="embedding 设备(如 cpu;MPS 挂起时用)")
+    parser.add_argument("--fact-extraction", action="store_true",
+                        help="写入时 LLM 原子事实抽取(需 SMILEX_EXTRACT_API_KEY)")
+    parser.add_argument("--rerank", action="store_true",
+                        help="cross-encoder 精排(bge-reranker-v2-m3,需下载 ~2.3GB)")
     parser.add_argument("--resume", action="store_true")
     args = parser.parse_args()
     return asyncio.run(run(args))

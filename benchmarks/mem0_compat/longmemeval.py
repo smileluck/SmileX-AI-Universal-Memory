@@ -97,10 +97,24 @@ def parse_lme_date(raw: str) -> datetime | None:
         return None
 
 
-async def ingest_sample(sample: dict, embedder, db_path: Path) -> MemoryMiddleware:
-    """灌入该题 haystack_sessions,并回填 session 日期到 time_start."""
+async def ingest_sample(
+    sample: dict, embedder, db_path: Path,
+    fact_extraction: bool = False, rerank: bool = False, device: str | None = None,
+) -> MemoryMiddleware:
+    """灌入该题 haystack_sessions,并回填 session 日期到 time_start.
+
+    fact_extraction: 写入时 LLM 原子事实抽取(SMILEX_EXTRACT_* 环境变量);
+    rerank: cross-encoder 精排(bge-reranker-v2-m3).
+    """
     from common import anchor_times
-    mw = MemoryMiddleware(db_path, embedder=embedder, promotion_threshold=0)
+    kwargs = {}
+    if fact_extraction:
+        from smilex.memory.lifecycle.extractor import LLMFactExtractor
+        kwargs["fact_extractor"] = LLMFactExtractor()
+    if rerank:
+        from smilex.memory.lifecycle.reranker import CrossEncoderReranker
+        kwargs["reranker"] = CrossEncoderReranker(device=device)
+    mw = MemoryMiddleware(db_path, embedder=embedder, promotion_threshold=0, **kwargs)
     await mw.initialize()
     dated: list[tuple[str, str]] = []
     try:
@@ -162,7 +176,8 @@ async def run(args: argparse.Namespace) -> int:
     cutoffs = [int(x) for x in args.cutoffs.split(",")]
     print(f"样本数: {len(samples)}(source={args.source}, seed={args.seed if not args.all_questions else '-'})")
 
-    ckpt_path = RESULTS_DIR / f"ckpt_lme_mem0compat_{args.source}_{args.embedder}.jsonl"
+    variant = ("_fx" if args.fact_extraction else "") + ("_rr" if args.rerank else "")
+    ckpt_path = RESULTS_DIR / f"ckpt_lme_mem0compat_{args.source}_{args.embedder}{variant}.jsonl"
     done: dict[str, dict] = {}
     if args.resume and ckpt_path.exists():
         for line in ckpt_path.open(encoding="utf-8"):
@@ -192,7 +207,11 @@ async def run(args: argparse.Namespace) -> int:
             try:
                 with tempfile.TemporaryDirectory(prefix="m0c_lme_") as td:
                     db = Path(td) / "bench.db"
-                    mw = await ingest_sample(sample, embedder, db)
+                    mw = await ingest_sample(
+                        sample, embedder, db,
+                        fact_extraction=args.fact_extraction,
+                        rerank=args.rerank, device=args.device,
+                    )
                     try:
                         resp = await mw.recall(
                             RecallRequest(query=question, top_k=TOP_K, token_budget=10**9),
@@ -271,6 +290,10 @@ def main() -> int:
                         choices=["sentence-transformers", "hash"])
     parser.add_argument("--device", default=None,
                         help="embedding 设备(如 cpu;MPS 挂起时用)")
+    parser.add_argument("--fact-extraction", action="store_true",
+                        help="写入时 LLM 原子事实抽取(需 SMILEX_EXTRACT_API_KEY)")
+    parser.add_argument("--rerank", action="store_true",
+                        help="cross-encoder 精排(bge-reranker-v2-m3,需下载 ~2.3GB)")
     parser.add_argument("--resume", action="store_true")
     args = parser.parse_args()
     return asyncio.run(run(args))

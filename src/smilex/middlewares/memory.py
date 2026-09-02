@@ -37,9 +37,11 @@ from typing import TYPE_CHECKING
 from ..memory.concurrency import ConcurrencyController
 from ..memory.lifecycle.context_builder import ContextBuilder
 from ..memory.lifecycle.embedder import Embedder, get_embedder
+from ..memory.lifecycle.extractor import FactExtractor, PassThroughExtractor
 from ..memory.lifecycle.l0_snapshot import L0SnapshotStore
 from ..memory.lifecycle.l0_working_memory import L0WorkingMemory
 from ..memory.lifecycle.promotion import PromotionManager
+from ..memory.lifecycle.reranker import Reranker
 from ..memory.lifecycle.token_counter import TokenCounter
 from ..memory.models import (
     Entity,
@@ -115,6 +117,13 @@ class MemoryMiddleware:
             注入可自定义锁超时/冲突解决策略
         promotion_threshold: L0→L1 晋升阈值(默认 800 tokens;批量导入历史
             数据等场景可调低,如 0 = 全部直入 L1 + 向量)
+        reranker: 检索精排器(None 时 NoopReranker 不干预排序;
+            cross-encoder 见 smilex.memory.lifecycle.reranker)
+        fact_extractor: 写入时事实抽取器(None 时 PassThroughExtractor,
+            原 content 整块写入,行为与现状一致;LLM 抽取见
+            smilex.memory.lifecycle.extractor)
+        facts_bypass_l0: 抽取产出的事实是否跳过 L0 直送 L1 晋升
+            (默认 True;短事实留在 L0 对 recall 不可见,仅 PassThrough 下无影响)
     """
 
     def __init__(
@@ -127,6 +136,9 @@ class MemoryMiddleware:
         l0: L0WorkingMemory | None = None,
         concurrency: ConcurrencyController | None = None,
         promotion_threshold: int = 800,
+        reranker: Reranker | None = None,
+        fact_extractor: FactExtractor | None = None,
+        facts_bypass_l0: bool = True,
     ) -> None:
         self._owns_engine = engine is None
         self._engine = engine or StorageEngine(db_path)
@@ -144,7 +156,10 @@ class MemoryMiddleware:
             l0=self._l0,
             vector_store=self._vector_store,
             token_counter=self._counter,
+            reranker=reranker,
         )
+        self._extractor = fact_extractor or PassThroughExtractor()
+        self._facts_bypass_l0 = facts_bypass_l0
         self._snapshots = L0SnapshotStore(self._engine)
         self._bootstrap: ProjectBootstrap | None = None
         # 最近一次 initialize_project 的项目 ID,write 的 scope_id 缺省值
@@ -386,25 +401,52 @@ class MemoryMiddleware:
             for handle in handles:
                 await handle.release()
 
-        # 2. FuzzyMemory → L0(PromotionManager: >800 tokens 自动晋升 L1 + 向量)
-        memory = FuzzyMemory(
-            content=request.content,
-            time_range=request.time_range,
-            location=request.location,
-            entities=list(request.entities),
-            relations=triple_ids,
-            scope=request.scope,
-            importance=request.importance,
+        # 2. 事实抽取 → 每条事实一个 FuzzyMemory → L0(超阈值自动晋升 L1 + 向量)
+        #    PassThrough(默认)下 facts == [request.content],行为与历史一致
+        try:
+            facts = await self._extractor.extract(request.content)
+        except Exception:
+            facts = [request.content]
+        if not facts:  # 防御: 抽取器返回空列表时退回原文
+            facts = [request.content]
+        bypass = self._facts_bypass_l0 and not isinstance(
+            self._extractor, PassThroughExtractor
         )
         conn = self._engine.conn
+        primary_id = ""
+        promoted_any = False
         try:
-            await self._promotion.put(conn, session_id, memory, scope_id=scope_id)
+            for fact in facts:
+                memory = FuzzyMemory(
+                    content=fact,
+                    time_range=request.time_range,
+                    location=request.location,
+                    entities=list(request.entities),
+                    relations=triple_ids if not primary_id else [],
+                    scope=request.scope,
+                    importance=request.importance,
+                )
+                if not primary_id:
+                    primary_id = memory.id
+                await self._promotion.put(
+                    conn, session_id, memory, scope_id=scope_id,
+                    auto_promote=not bypass,
+                )
+                if bypass:
+                    # 抽取产出的事实(通常短于阈值)直送 L1,保证可检索
+                    await self._promotion.promote(
+                        conn, session_id, memory.id, scope_id=scope_id
+                    )
+                    promoted_any = True
+                elif self._l0.get(session_id, memory.id) is None:
+                    promoted_any = True
             await conn.commit()
         except Exception:
             await conn.rollback()
             raise
 
-        promoted = self._l0.get(session_id, memory.id) is None
+        memory_id = primary_id
+        promoted = promoted_any
         layers = [MemoryLayer.L1_SHORT if promoted else MemoryLayer.L0_WORKING]
         if triple_ids:
             layers.append(MemoryLayer.L2_LONG)

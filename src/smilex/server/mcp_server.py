@@ -20,6 +20,8 @@ import json
 from typing import TYPE_CHECKING
 
 from ..memory.lifecycle.embedder import EmbedderConfig, get_embedder
+from ..memory.lifecycle.extractor import ExtractorConfig, get_extractor
+from ..memory.lifecycle.reranker import RerankerConfig, get_reranker
 from ..memory.models import MemoryScope, ScopeFilter
 from ..middlewares.dto import (
     ProjectInitRequest,
@@ -70,8 +72,15 @@ class MemoryService:
         async with self._lock:
             if self._memory is None:
                 embedder = get_embedder(EmbedderConfig(backend=self._config.embedder))
+                reranker = get_reranker(RerankerConfig(backend=self._config.reranker))
+                extractor = get_extractor(
+                    ExtractorConfig(backend=self._config.fact_extractor)
+                )
                 memory = MemoryMiddleware(
-                    self._config.resolved_db_path(), embedder=embedder
+                    self._config.resolved_db_path(),
+                    embedder=embedder,
+                    reranker=reranker,
+                    fact_extractor=extractor,
                 )
                 await memory.initialize()
                 self._memory = memory

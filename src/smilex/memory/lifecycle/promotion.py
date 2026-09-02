@@ -37,6 +37,19 @@ if TYPE_CHECKING:
 L0_PROMOTION_THRESHOLD = 800
 
 
+def _time_start_iso(memory: FuzzyMemory) -> str:
+    """time_start 取值优先级: time_range.exact > approx_start > created_at.
+
+    历史行为是 created_at 墙钟,导致写入方提供的 time_range(如历史对话
+    的真实发生时间)在晋升后丢失;基准评测曾被迫按 content 文本匹配回填.
+    """
+    tr = memory.time_range
+    anchor = None
+    if tr is not None:
+        anchor = tr.exact or tr.approx_start
+    return to_iso(anchor or memory.created_at)
+
+
 class PromotionManager:
     """L0→L1 晋升管理 — 阈值检查 + 写入存储/向量 + L0 移除.
 
@@ -162,7 +175,7 @@ class PromotionManager:
             (
                 memory.id,
                 memory.id,
-                to_iso(memory.created_at),
+                _time_start_iso(memory),
                 to_iso(memory.expires_at) if memory.expires_at else None,
                 memory.content,
                 json.dumps(memory.entities),

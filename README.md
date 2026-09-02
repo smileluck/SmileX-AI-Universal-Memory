@@ -293,6 +293,31 @@ LongMemEval original 版部分题目 gold 标注歧义(如 multi-session 计数�
 single-hop 仅 2 题),与 mem0 全量(~1540 题)口径有差异,仅供参考;
 全量可 `uv run python benchmarks/mem0_compat/locomo.py --resume` 续跑。
 
+### 检索与记忆形成优化(2026-09-02)
+
+两项可选增强,均默认关闭(零依赖行为不变),经 benchmark 定位弱点后引入:
+
+**Cross-Encoder 精排**(`[rerank]` extra,bge-reranker-v2-m3)
+- 位置: 多路召回 RRF 融合之后、token 裁剪之前,对 L1/L2 候选按层精排
+  (L0 工作记忆不动);每层上限 50 条候选保护 recall 延迟预算
+- 接入: `MemoryMiddleware(reranker=get_reranker(RerankerConfig(backend="cross-encoder")))`
+  或 config.toml `reranker = "cross-encoder"`
+- 对比验证: `uv run python benchmarks/retrieval_baseline/run_baseline.py --dataset locomo --rerank --skip-raw`
+
+**写入时 LLM 事实抽取**(`[llm]` extra,OpenAI 兼容 API,core 保持零 LLM)
+- `FactExtractor` Protocol,默认 `PassThroughExtractor`(原 content 整块写入);
+  `LLMFactExtractor` 把长块抽取为原子事实(一句一事、保留日期/实体/待办),
+  每条事实独立入库并可检索——对齐 mem0 的事实卡记忆形成方式,
+  是计数/跨 session 整合类问题的关键补强
+- 失败语义: 未配置 key / 调用失败一律降级回原文整块,write 永不因抽取崩
+- 接入: 构造 `LLMFactExtractor()`(env `SMILEX_EXTRACT_API_KEY/BASE_URL/MODEL`)
+  或 config.toml `fact_extractor = "llm"`
+- 对比验证: `uv run python benchmarks/mem0_compat/longmemeval.py --per-type 1 --fact-extraction`
+
+**顺带修复**: `WriteRequest.time_range` 现在会锚定到晋升后的
+`temporal_fragments.time_start`(此前用墙钟 created_at,历史对话时间丢失,
+benchmark 曾被迫按文本匹配回填)。
+
 其他说明:
 
 - LongMemEval 数据源 `--source original`(默认,与历史连续)/ `cleaned`

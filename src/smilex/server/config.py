@@ -9,6 +9,8 @@
     host = "127.0.0.1"
     port = 8765
     embedder = "hash"            # 或 "sentence-transformers"(需 [embedding] extras)
+    reranker = "noop"            # 或 "cross-encoder"(需 [rerank] extras)
+    fact_extractor = "passthrough"  # 或 "llm"(需 [llm] extras + SMILEX_EXTRACT_* 环境变量)
     token_budget = 4000
     enable_scheduler = true      # serve 进程内跑 5 类核心调度任务
 """
@@ -33,6 +35,8 @@ class ServerConfig(BaseModel):
     host: str = "127.0.0.1"
     port: int = Field(default=8765, ge=1, le=65535)
     embedder: str = "hash"  # hash | sentence-transformers
+    reranker: str = "noop"  # noop | cross-encoder(需 [rerank] extras)
+    fact_extractor: str = "passthrough"  # passthrough | llm(需 [llm] extras + SMILEX_EXTRACT_* 环境变量)
     token_budget: int = Field(default=4000, gt=0)
     enable_scheduler: bool = True
 
