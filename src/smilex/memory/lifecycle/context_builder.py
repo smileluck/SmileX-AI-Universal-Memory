@@ -35,6 +35,7 @@ if TYPE_CHECKING:
     from ..models import ScopeFilter
     from ..storage.vector_store import VectorStore
     from .l0_working_memory import L0WorkingMemory
+    from .reranker import Reranker
 
 # 主文档 §7.4: 总预算 4000 tokens
 DEFAULT_TOKEN_BUDGET = 4000
@@ -139,6 +140,8 @@ class ContextBuilder:
         vector_store: L1 向量存储(None 时跳过 L1 层)
         token_counter: token 计数器(None 时新建默认实例)
         safety_margin: 安全边际(默认 0.7,模块文档 03 §3.1)
+        reranker: 可选精排器(None/Noop 时不干预排序;cross-encoder 时
+            在多路召回后对 L1/L2 候选按层精排,见 _rerank_candidates)
     """
 
     def __init__(
@@ -148,11 +151,15 @@ class ContextBuilder:
         vector_store: VectorStore | None = None,
         token_counter: TokenCounter | None = None,
         safety_margin: float = SAFETY_MARGIN,
+        reranker: Reranker | None = None,
     ) -> None:
+        from .reranker import NoopReranker
+
         self._l0 = l0
         self._vector_store = vector_store
         self._counter = token_counter or TokenCounter()
         self._safety_margin = safety_margin
+        self._reranker = reranker or NoopReranker()
 
     async def build_context(
         self,
@@ -195,7 +202,49 @@ class ContextBuilder:
             l1_top_k=l1_top_k,
             l2_top_k=l2_top_k,
         )
+        candidates = await self._rerank_candidates(query_text, candidates)
         return self._greedy_fill(candidates, budget)
+
+    # ==================== 精排 ====================
+
+    async def _rerank_candidates(
+        self, query_text: str | None, candidates: list[ContextSource]
+    ) -> list[ContextSource]:
+        """cross-encoder 精排 — 对 L1/L2 候选按层重打分(L0 不动).
+
+        - Noop(默认): 原样返回,行为与未引入精排完全一致
+        - 每层只取前 reranker.max_candidates 条送精排(延迟保护,recall
+          P99 预算 200-500ms),其余保留原分数并排在精排条目之后
+        - 精排分数 min-max 归一化到 [0,1] 替换原 RRF 分数,层优先级不变
+        - query_text 为空(纯 L0/L2 实体检索)或精排异常时不干预(降级)
+        """
+        from .reranker import NoopReranker
+
+        if query_text is None or isinstance(self._reranker, NoopReranker):
+            return candidates
+        max_cand = getattr(self._reranker, "max_candidates", 50)
+        for layer in ("L1", "L2"):
+            idxs = [i for i, c in enumerate(candidates) if c.layer == layer]
+            if not idxs:
+                continue
+            head, tail = idxs[:max_cand], idxs[max_cand:]
+            docs = [candidates[i].content for i in head]
+            try:
+                scores = await self._reranker.rerank(query_text, docs)
+            except Exception:
+                # 精排失败降级: 保留原 RRF 分数,不让 recall 崩
+                continue
+            if len(scores) != len(docs) or not scores:
+                continue
+            lo, hi = min(scores), max(scores)
+            span = hi - lo
+            for i, s in zip(head, scores):
+                candidates[i].score = (s - lo) / span if span > 0 else 1.0
+            for i in tail:
+                # 未精排条目压到精排条目之后(归一化下界以下)
+                candidates[i].score = min(candidates[i].score, 0.0)
+        candidates.sort(key=lambda s: (_LAYER_PRIORITY[s.layer], -s.score))
+        return candidates
 
     # ==================== 召回聚合 ====================
 

@@ -241,9 +241,16 @@ async def run(args: argparse.Namespace) -> int:
                     stats["raw_bge_m3"][qd["qtype"]].append(hit)
                 # smilex 通道
                 if mw is None:
+                    reranker = None
+                    if args.rerank:
+                        from smilex.memory.lifecycle.reranker import (
+                            CrossEncoderReranker,
+                        )
+                        reranker = CrossEncoderReranker(device=args.device)
+                        print("cross-encoder 精排已启用(BAAI/bge-reranker-v2-m3,首次运行需下载 ~2.3GB)")
                     mw = MemoryMiddleware(
                         Path(tmp.name) / "bench.db", embedder=embedder,
-                        promotion_threshold=0,
+                        promotion_threshold=0, reranker=reranker,
                     )
                     await mw.initialize()
                     await write_all(mw, chunks)
@@ -317,6 +324,8 @@ def main() -> int:
     parser.add_argument("--top-k", type=int, default=10)
     parser.add_argument("--skip-raw", action="store_true",
                         help="只跑 smilex 通道(对照数字已有 raw 结果时)")
+    parser.add_argument("--rerank", action="store_true",
+                        help="启用 cross-encoder 精排(bge-reranker-v2-m3,需下载 ~2.3GB)")
     parser.add_argument("--device", default=None,
                         help="embedding 设备(如 cpu;默认自动。MPS 连跑挂起时可指定 cpu)")
     args = parser.parse_args()
