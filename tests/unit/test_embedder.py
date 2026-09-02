@@ -129,3 +129,30 @@ def test_st_embedder_lazy_no_import_on_init():
     emb = SentenceTransformerEmbedder(model_name="BAAI/bge-m3")
     assert emb._model is None
     assert emb.model_name == "BAAI/bge-m3"
+
+
+# ---------- SentenceTransformerEmbedder._sanitize(特殊 token 字面量) ----------
+
+
+def test_st_embedder_sanitize_strips_special_token_literals():
+    """语料中出现 "<|endoftext|>" 等特殊 token 字面量时去掉尖括号.
+
+    回归: LongMemEval 部分样本原文含 <|endoftext|>,HF tokenizer 默认
+    拒绝编码导致 ingest 崩溃(benchmark 全题记 0).
+    """
+    assert SentenceTransformerEmbedder._sanitize("a <|endoftext|> b") == "a |endoftext| b"
+    assert SentenceTransformerEmbedder._sanitize("<|endoftext|>") == "|endoftext|"
+    # 普通文本(含合法尖括号标签)不受影响
+    assert SentenceTransformerEmbedder._sanitize("normal <html> text") == "normal <html> text"
+    assert SentenceTransformerEmbedder._sanitize("no specials") == "no specials"
+
+
+def test_st_embedder_sanitize_handles_arbitrary_special_tokens():
+    """任意 <|...|> 形式的特殊 token 都被处理,不只 <|endoftext|>."""
+    assert (
+        SentenceTransformerEmbedder._sanitize("x <|start_header_id|> y <|eot_id|> z")
+        == "x |start_header_id| y |eot_id| z"
+    )
+    # 超长或畸形内容不误伤(不是 <|...|> 形式)
+    weird = "a <|" + "x" * 64 + "|> b"
+    assert SentenceTransformerEmbedder._sanitize(weird) == weird
