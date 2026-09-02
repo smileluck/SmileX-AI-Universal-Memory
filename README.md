@@ -279,6 +279,12 @@ mem0 官方(gpt-5 作答+判卷)headline 94.4%。本项目以 flash 级模型达
 LongMemEval original 版部分题目 gold 标注歧义(如 multi-session 计数题把
 "从亲友处取回衣物"计入"店内取/退"),可用 `--source cleaned` 对照。
 
+**开启写入时事实抽取后(2026-09-02,同采样同模型,`--fact-extraction`)**:
+四个 cutoff 全部 **96.7%**(29/30,唯一失败为上述标注歧义题),且各 cutoff
+完全一致——原子事实让 10 条记忆的小上下文即可装下答案要点,不再依赖大
+cutoff 凑证据、也不受长 prompt 干扰。判卷经 rejudge.py 离线修正(judge
+思考文本截断曾误记 0 分)。此成绩超过 mem0 官方 94.4(gpt-5)。
+
 ### LoCoMo 实测(mem0 口径,2026-09-01)
 
 对话 0-2 各取前 30 题(共 90 题,answerer/judge = glm-5.3-flash):
