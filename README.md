@@ -336,7 +336,8 @@ temporal/multi-hop,与 mem0 全量 ~1540 题有差异),仅供参考;全量可
 
 ## 设计文档
 
-- [架构整合](docs/design/agent-memory-design.md) — 主架构 spec/contract
+- [现状架构总览](docs/design/architecture-asbuilt.md) — **as-built**:已实现系统的架构/数据流/设计决策(先读)
+- [架构整合](docs/design/agent-memory-design.md) — 设计时 spec/contract(部分选型已演进,以 as-built 为准)
 - [模块总览](docs/design/modules/00-overview.md) — 13 个模块文档导航
 - [Embedding 选型](docs/analyse/embedding-layer.md) — 技术栈选型论证
 

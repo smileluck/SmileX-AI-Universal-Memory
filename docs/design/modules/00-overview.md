@@ -1,8 +1,11 @@
 # 模块选型与算法优化总览
 
-> **版本**：v1.0
-> **更新日期**：2026-06-21
-> **配套文档**：[agent-memory-design.md](../agent-memory-design.md)（架构整合）
+> **版本**：v1.1
+> **更新日期**：2026-09-04
+> **配套文档**：[agent-memory-design.md](../agent-memory-design.md)（架构整合）；
+> 实现现状请以 [architecture-asbuilt.md](../architecture-asbuilt.md)（as-built 总览，2026-09）为准——
+> 本系列为设计时文档，部分选型已演进（如向量存储实际为 sqlite-vec 单轨、
+> 新增 FTS5 双通道检索 / CrossEncoder 精排 / 写入时事实抽取）
 > **目的**：每个模块的**选型考虑**、**算法优化**、**实施建议**，帮助深入掌握项目细节
 
 ---
@@ -42,7 +45,7 @@ docs/design/
 | 维度 | 选型 | 关键理由 |
 |------|------|---------|
 | 主库 | **SQLite 3.40+** | 嵌入式零安装、单文件、WAL 并发 |
-| 向量 | **sqlite-vec + ChromaDB** | 嵌入式双轨、HNSW 性能 |
+| 向量 | **sqlite-vec + ChromaDB** | 嵌入式双轨、HNSW 性能（实现时收敛为 sqlite-vec 单轨） |
 | 空间 | **R-tree**（SQLite 内置）| 原生支持、零扩展 |
 | 缓存 | **cachebox** | Cython 加速、~100万 ops/s |
 | 数据模型 | **dataclass + Pydantic v2** | 前者内部、后者边界验证 |
