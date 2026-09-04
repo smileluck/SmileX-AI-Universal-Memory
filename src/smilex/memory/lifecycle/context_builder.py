@@ -238,7 +238,7 @@ class ContextBuilder:
                 continue
             lo, hi = min(scores), max(scores)
             span = hi - lo
-            for i, s in zip(head, scores):
+            for i, s in zip(head, scores, strict=True):
                 candidates[i].score = (s - lo) / span if span > 0 else 1.0
             for i in tail:
                 # 未精排条目压到精排条目之后(归一化下界以下)

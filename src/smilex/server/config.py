@@ -36,7 +36,8 @@ class ServerConfig(BaseModel):
     port: int = Field(default=8765, ge=1, le=65535)
     embedder: str = "hash"  # hash | sentence-transformers
     reranker: str = "noop"  # noop | cross-encoder(需 [rerank] extras)
-    fact_extractor: str = "passthrough"  # passthrough | llm(需 [llm] extras + SMILEX_EXTRACT_* 环境变量)
+    # passthrough | llm(需 [llm] extras + SMILEX_EXTRACT_* 环境变量)
+    fact_extractor: str = "passthrough"
     token_budget: int = Field(default=4000, gt=0)
     enable_scheduler: bool = True
 

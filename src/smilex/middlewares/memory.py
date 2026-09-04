@@ -445,13 +445,11 @@ class MemoryMiddleware:
             await conn.rollback()
             raise
 
-        memory_id = primary_id
-        promoted = promoted_any
-        layers = [MemoryLayer.L1_SHORT if promoted else MemoryLayer.L0_WORKING]
+        layers = [MemoryLayer.L1_SHORT if promoted_any else MemoryLayer.L0_WORKING]
         if triple_ids:
             layers.append(MemoryLayer.L2_LONG)
         return WriteResponse(
-            memory_id=memory.id,
+            memory_id=primary_id or memory.id,
             status=WriteStatus.SAVED,
             layers_affected=layers,
         )

@@ -9,12 +9,10 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
-from smilex.middlewares.dto import RecallRequest, WriteRequest
-from smilex.middlewares.memory import MemoryMiddleware
 from smilex.memory.lifecycle.extractor import (
     ExtractorConfig,
     LLMFactExtractor,
@@ -22,7 +20,8 @@ from smilex.memory.lifecycle.extractor import (
     get_extractor,
 )
 from smilex.memory.models import MemoryScope, TimeRange
-
+from smilex.middlewares.dto import WriteRequest
+from smilex.middlewares.memory import MemoryMiddleware
 
 # ---------- PassThroughExtractor / 工厂 ----------
 
@@ -55,7 +54,11 @@ async def test_llm_extractor_degrades_without_api_key():
 
 
 def test_llm_extractor_parse_json_array():
-    text = 'Here you go:\n```json\n["The user needs to pick up dry cleaning on Oct 22.", "The user bought black jeans from Levi\'s."]\n```'
+    text = (
+        "Here you go:\n```json\n["
+        '"The user needs to pick up dry cleaning on Oct 22.", '
+        '"The user bought black jeans from Levi\'s."]\n```'
+    )
     facts = LLMFactExtractor._parse_facts(text)
     assert facts == [
         "The user needs to pick up dry cleaning on Oct 22.",
@@ -173,7 +176,7 @@ async def test_promotion_time_start_anchored_to_time_range():
     mw = MemoryMiddleware()
     await mw.initialize()
     try:
-        tr = TimeRange(exact=datetime(2023, 10, 22, tzinfo=timezone.utc))
+        tr = TimeRange(exact=datetime(2023, 10, 22, tzinfo=UTC))
         await mw.write(
             WriteRequest(
                 scope=MemoryScope.GLOBAL, content="word " * 900, time_range=tr
@@ -196,7 +199,7 @@ async def test_promotion_time_start_approx_start_used():
     mw = MemoryMiddleware()
     await mw.initialize()
     try:
-        tr = TimeRange(approx_start=datetime(2024, 1, 15, tzinfo=timezone.utc))
+        tr = TimeRange(approx_start=datetime(2024, 1, 15, tzinfo=UTC))
         await mw.write(
             WriteRequest(
                 scope=MemoryScope.GLOBAL, content="word " * 900, time_range=tr

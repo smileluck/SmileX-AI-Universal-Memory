@@ -19,7 +19,6 @@ from smilex.memory.lifecycle.reranker import (
     get_reranker,
 )
 
-
 # ---------- NoopReranker ----------
 
 

@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from smilex.memory.lifecycle import ContextBuilder, HashEmbedder, L0WorkingMemory
-from smilex.memory.storage.queries.fts import build_fts_query, bm25_fragment_search
+from smilex.memory.storage.queries.fts import bm25_fragment_search, build_fts_query
 from smilex.memory.storage.sqlite_engine import SQLiteEngine
 from smilex.memory.storage.vector_store import VectorStore
 

@@ -150,7 +150,10 @@ class SentenceTransformerEmbedder:
 
     @classmethod
     def _sanitize(cls, text: str) -> str:
-        return cls._SPECIAL_TOKEN_RE.sub(lambda m: m.group(0).replace("<", "").replace(">", ""), text)
+        def _strip_angles(m: re.Match[str]) -> str:
+            return m.group(0).replace("<", "").replace(">", "")
+
+        return cls._SPECIAL_TOKEN_RE.sub(_strip_angles, text)
 
     def embed(self, text: str) -> np.ndarray:
         model = self._load_model()
