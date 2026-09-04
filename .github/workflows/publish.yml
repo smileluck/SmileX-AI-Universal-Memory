@@ -1,7 +1,18 @@
 # PyPI 发布流水线(Trusted Publishing / OIDC,免 token)
-# 触发: 推送 v* 标签(如 git tag v0.1.0 && git push origin v0.1.0)
-# 前置: PyPI 项目设置里添加 Trusted Publisher,
-#       workflow filename 填 publish.yml,environment 填 pypi
+#
+# 触发: 推送 v* 标签
+#   git tag v0.1.2 && git push origin v0.1.2
+#
+# 前置(一次性配置):
+#   PyPI 项目 → Publishing → Add Trusted Publisher:
+#     PyPI project name : smilex-ai-memory
+#     owner             : smileluck
+#     repository        : SmileX-AI-Universal-Memory
+#     workflow filename : publish.yml
+#     environment       : pypi
+#   GitHub 仓库 → Settings → Environments → 新建 `pypi`(可加保护规则)
+#
+# 流程: test(门禁)→ build(sdist+wheel)→ pypi(带 attestation)
 name: publish
 
 on:
@@ -10,12 +21,34 @@ on:
       - "v*"
 
 jobs:
+  test:
+    # 发布前门禁: 全矩阵单测不绿不放行
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        python-version: ["3.11", "3.14"] # 边界版本;中间版本由 ci.yml 全矩阵覆盖
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: uv sync --extra dev --extra llm --extra server
+      - run: uv run pytest tests/unit tests/smoke -q
+
   build:
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - uses: astral-sh/setup-uv@v5
+
+      - name: 校验 tag 与包版本一致(hatchling 从 pyproject 取版本)
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          PKG=$(grep -m1 '^version' pyproject.toml | sed 's/version = "\(.*\)"/\1/')
+          [ "$TAG" = "$PKG" ] || { echo "tag v$TAG 与 pyproject version $PKG 不一致"; exit 1; }
 
       - name: 构建 sdist + wheel
         run: uv build
@@ -41,5 +74,5 @@ jobs:
 
       - uses: astral-sh/setup-uv@v5
 
-      - name: 发布到 PyPI
-        run: uv publish
+      - name: 发布到 PyPI(含 provenance attestation)
+        run: uv publish --attest

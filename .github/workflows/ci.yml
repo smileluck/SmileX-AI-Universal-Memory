@@ -1,0 +1,40 @@
+# CI: lint + 单测矩阵(Python 3.11-3.14)
+# push main / PR 时跑全矩阵;发布流水线(publish.yml)复用 test job 作门禁
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --extra dev
+      - run: uv run ruff check src/ tests/
+      - run: uv run ruff format --check src/ tests/ || true
+
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: 安装依赖(dev + llm + server;embedding 涉及大模型下载,单测不需要)
+        run: uv sync --extra dev --extra llm --extra server
+      - name: 单元测试
+        run: uv run pytest tests/unit -q
+      - name: 冒烟测试(依赖可用性)
+        run: uv run pytest tests/smoke -q
