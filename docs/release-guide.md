@@ -60,15 +60,19 @@ uv build
 uv publish --publish-url https://test.pypi.org/legacy/
 
 # 5. 验证: 从 TestPyPI 全新安装(注意依赖需回退到主 PyPI)
+#    陷阱: 须用 uv pip 指定目标环境,且 cd 到项目外——
+#    项目目录内跑 `uv run pip` 会解析到本地项目(就地构建)而非 TestPyPI 产物,
+#    且 uv venv 默认不含 pip(会报 Failed to spawn: pip)
 uv venv /tmp/verify-venv
-source /tmp/verify-venv/bin/activate   # Windows: /tmp/verify-venv/Scripts/activate
-pip install --index-url https://test.pypi.org/simple/ \
-            --extra-index-url https://pypi.org/simple/ \
-            'smilex-ai-memory[server]'
+cd /tmp
+uv pip install --python /tmp/verify-venv \
+    --index-url https://test.pypi.org/simple/ \
+    --extra-index-url https://pypi.org/simple/ \
+    'smilex-ai-memory[server]'
 
 # 6. 验证基本功能
-smilex-memory doctor
-python -c "import smilex; print(smilex.__name__, 'ok')"
+/tmp/verify-venv/bin/smilex-memory doctor
+/tmp/verify-venv/bin/python -c "import smilex; print(smilex.__name__, 'ok')"
 ```
 
 注意:`--index-url` 指向 TestPyPI 时,必须加 `--extra-index-url https://pypi.org/simple/`,因为项目的依赖(pydantic、aiosqlite 等)不在 TestPyPI 上。
