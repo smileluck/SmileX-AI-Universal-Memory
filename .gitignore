@@ -32,3 +32,6 @@ benchmarks/longmemeval/results/
 .vscode/
 .idea/
 *.swp
+
+# mem0_compat 数据集缓存(245MB,下载脚本可重建)
+benchmarks/mem0_compat/data/longmemeval_s_cleaned.jsonl
