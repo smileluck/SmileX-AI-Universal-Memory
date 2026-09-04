@@ -341,6 +341,7 @@ temporal/multi-hop,与 mem0 全量 ~1540 题有差异),仅供参考;全量可
 - [模块总览](docs/design/modules/00-overview.md) — 13 个模块文档导航
 - [Embedding 选型](docs/analyse/embedding-layer.md) — 技术栈选型论证
 - [发布说明](docs/release-guide.md) — TestPyPI(测试)/ PyPI(生产)发布流程
+- [更新日志](CHANGELOG.md) — 各版本变更记录
 
 ## 阶段路线图
 

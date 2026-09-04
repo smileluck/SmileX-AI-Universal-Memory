@@ -51,11 +51,12 @@ $env:UV_PUBLISH_TOKEN = "pypi-<testpypi-token>"
 uv run pytest tests/ -v
 uv run ruff check src/ tests/
 
-# 3. 清理并构建
+# 3. 清理并构建(必须! uv publish 只上传 dist/ 下现成文件,不会自动构建,
+#    dist/ 不存在时报 "No files found to publish")
 rm -rf dist/
 uv build
 
-# 4. 发布到 TestPyPI
+# 4. 发布到 TestPyPI(本地无 Trusted Publishing,须先 export UV_PUBLISH_TOKEN)
 uv publish --publish-url https://test.pypi.org/legacy/
 
 # 5. 验证: 从 TestPyPI 全新安装(注意依赖需回退到主 PyPI)
@@ -86,10 +87,15 @@ git tag v0.1.2
 git push origin main v0.1.2
 ```
 
-CI 流程(`.github/workflows/publish.yml`):
+CI 流程(`.github/workflows/publish.yml`,tag 触发):
 
-1. `build` job: `uv build` 构建 sdist + wheel,上传为 artifact
-2. `pypi` job: 在 `pypi` environment 下通过 OIDC 获取凭证,`uv publish` 发布
+1. `test` job(门禁): Python 3.11 + 3.14 两个边界版本跑全量单测 + 冒烟,
+   不绿不放行(日常 push/PR 由 `ci.yml` 覆盖 3.11-3.14 全矩阵 + ruff)
+2. `build` job: 校验 tag 与 `pyproject.toml` 的 version 一致 → `uv build`
+   构建 sdist + wheel,上传为 artifact
+3. `pypi` job: 在 `pypi` environment 下通过 OIDC 获取凭证,
+   `uv publish --attest` 发布(带 provenance attestation,PyPI 页面显示
+   verified 来源)
 
 发布完成后验证:
 
