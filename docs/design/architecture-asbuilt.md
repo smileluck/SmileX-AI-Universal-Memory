@@ -25,6 +25,7 @@
 13. [性能注记](#13-性能注记)
 14. [扩展指南](#14-扩展指南)
 15. [关键设计决策速查](#15-关键设计决策速查)
+16. [名词解释表](#16-名词解释表)
 
 ***
 
@@ -396,4 +397,125 @@ token_budget=4000 / enable_scheduler=true`,CLI 可覆盖 db/host/port):
 | 调度     | 拉取式触发 + 协作式抢占断点                         | 无后台线程,断点可续跑,冷启动成本可控                  |
 | 图计算    | SQL 递归 CTE 而非 NetworkX 存储               | 数据不双写,BFS 下推到 SQLite;NetworkX 只做离线分析 |
 | ID     | ULID                                    | 时间有序,字符串友好                           |
+
+## 16. 名词解释表
+
+按主题分组;首次出现的术语在正文各节有更详细的展开。
+
+### 记忆模型与分层
+
+| 名词 | 解释 |
+|---|---|
+| L0(工作记忆) | 进程内 cachebox LRU 缓存,按 session 隔离,驻留期不嵌入向量;类比"正在想的事" |
+| L1(短时记忆) | `temporal_fragments` 表 + 向量索引,可全文/语义检索;类比"最近几天的事" |
+| L2(长时记忆) | 知识图谱(entities/triples)+ 因果链,由 consolidate 任务从 L1 固化;类比"长期知识" |
+| L3(语义层) | 设计中的语义社区层;现状仅 semantic 任务用 NetworkX 预计算连通分量缓存,不在检索主路径 |
+| FuzzyMemory | 核心记忆对象,全字段可选的"渐进式存储":时间可模糊、位置可只给层级,不要求一次填全 |
+| TimeRange | 模糊时间表达:exact(精确时刻)或 approx_start+approx_end(约略区间),二选一 |
+| FuzzyLocation | 模糊位置表达:精确坐标 / 层级路径 / 区域名 / location_id 四种形态任选 |
+| importance | 写入方给的 [0,1] 重要度;参与 L0 排序、forget 留存分、晋升决策 |
+| scope / scope_id | 记忆的作用域(项目隔离单元);ScopeFilter 控制检索时包含哪些 scope 及是否含 global |
+| global scope | 跨项目共享区;ScopePromoter 把多项目重复模式提升到这里 |
+| session | L0 工作记忆的隔离键,一个对话会话一个;close_session 落快照可恢复 |
+| 晋升(promotion) | L0→L1 流转:写 temporal_fragments + 向量,再从 L0 移除;阈值默认 800 token |
+| promotion_threshold | 晋升 token 阈值;传 0 = 全部直送 L1(benchmark 常用) |
+| facts_bypass_l0 | 抽取模式下短事实跳过 L0 直送 L1,保证原子事实立即可检索 |
+
+### 检索
+
+| 名词 | 解释 |
+|---|---|
+| 双通道 | L1 同时走向量 KNN(语义近似)+ FTS5 BM25(精确关键词)两路 |
+| RRF | Reciprocal Rank Fusion,多路排名融合:score(d)=Σ 1/(k+rank_i(d)),k=60;只看名次不看分值,天然可比 |
+| KNN | K 近邻向量检索(sqlite-vec),把 query 嵌入后找余弦最近邻 |
+| BM25 | 经典词频相关度打分函数,FTS5 内置;补向量检索对专有名词/日期的漏检 |
+| FTS5 / trigram | SQLite 全文检索虚拟表;trigram 分词器按 3 字符滑窗,中英文(含 CJK 子串)通吃 |
+| CrossEncoder 精排 | 把 (query, doc) 成对送 reranker 模型(bge-reranker-v2-m3)重打分;比双塔准但慢,故只精排前 50 条 |
+| max_candidates | 精排每层送评的候选上限(默认 50),保护 recall 延迟预算 |
+| hybrid_memory_search | L2 多策略检索:时序/图谱 n 度/空间/因果各出 top-20 再 RRF |
+| token budget / 安全边际 | recall 注入上下文的 token 上限(默认 4000),实际装填按 ×0.7(2800)留余量 |
+| 贪心装填 | 按优先级逐条尝试:装得下就进,装不下跳过但继续试更小的后续条目 |
+| ContextSource / BuiltContext | 检索管线的中间产物(带层标记的候选)与最终产物(text + sources + truncated) |
+| MemoryRef | recall 返回的单条引用(id/layer/score/snippet),snippet 截断 120 字符 |
+
+### 写入与抽取
+
+| 名词 | 解释 |
+|---|---|
+| FactExtractor | 写入时事实抽取 Protocol;PassThrough(默认,原文整块)/ LLM(拆原子事实) |
+| 原子事实 / 事实卡 | 一句一事的短事实(保留日期/实体/待办),对齐 mem0 的记忆形成方式;计数/聚合题的关键补强 |
+| 降级 | 组件失败时回退到保底行为而非报错(抽取失败→原文,FTS 缺表→纯向量,精排异常→原分数) |
+| time_start 锚定 | 晋升时 time_start 取 time_range.exact > approx_start > created_at,历史对话保留真实发生时间 |
+| PassThrough / Noop / Hash | 三个 Protocol 的零依赖默认实现的统称——不引入外部模型时的保底行为 |
+
+### 存储
+
+| 名词 | 解释 |
+|---|---|
+| schema 版本(user_version) | `PRAGMA user_version` 记录库结构版本(现 13),迁移 SQL 按序补跑 |
+| temporal_fragments | L1 主体表:content/layer/time_start/scope/importance |
+| entities / triples | 图谱节点与三元组;triples 带 valid_from/to(双时态)与 predecessor_id |
+| 双时态(bitemporal) | 三元组同时记录"业务有效时间"(valid_from/to)与写入时间,支持时间点回溯 |
+| predecessor_id | triples 上的因果链指针:这条事实由哪条先前事实演变而来 |
+| causal_chains | 调度器 causal 任务维护的因果链物化表 |
+| vector_links | 向量行 ↔ 业务行(fragment/entity/triple)的关联表 |
+| fts_fragments | FTS5 external-content 虚拟表(不复制内容,靠 rowid 映射回 temporal_fragments,触发器保同步) |
+| sqlite-vec | SQLite 向量扩展,提供 FLOAT[1024] 虚拟表与 KNN |
+| R-tree / Haversine | SQLite 内置空间索引(bbox 预过滤)/ 球面距离公式(精算半径内) |
+| WAL | SQLite Write-Ahead Logging,读写不互斥,并发读取的基础 |
+| ULID | 时间有序的唯一 ID(可排序、字符串友好),替代自增主键 |
+| msgpack | 二进制序列化(热路径/断点 cursor 用),比 JSON 紧凑 |
+| 归档 / 冷热分层 | 过期数据(triples 365 天 / fragments 180 天)移入归档区、去掉向量;可恢复、可召回(带 [归档] 前缀) |
+
+### 调度与生命周期
+
+| 名词 | 解释 |
+|---|---|
+| 拉取式触发 | 触发器不推队列,drain() 被调用时才结算到期任务;无后台线程 |
+| TimeTrigger / EventTrigger / AdaptiveTrigger | 周期触发 / 事件映射触发 / 规则条件触发(带冷却防抖) |
+| 抢占(preempt) | 中断运行中任务的策略族:NONE/IMMEDIATE/GRACEFUL/COOPERATIVE/PRIORITY_INHERITANCE |
+| COOPERATIVE / checkpoint() | 协作式让出:任务在安全点主动存断点(进度+步号+msgpack cursor)后停下,可 resume 续跑 |
+| consolidate | 核心任务:L1 碎片按 entity/scope 聚合固化成 L2 三元组 |
+| forget / 半衰期 | 核心任务:留存分 = importance × 0.5^(age/30 天),低于 0.1 删除或降权 |
+| summarize | 核心任务:规则式(非 LLM)摘要压缩 |
+| semantic | 核心任务:NetworkX 构实体图、预计算连通分量("语义社区")缓存 |
+| bootstrap / 冷启动 | 新项目初始化包:向导问答 + README 解析 + 模板 + 种子注入 + 批量导入 |
+| 种子注入(seed) | 预置的领域知识实体/三元组,新项目开箱即有基础记忆 |
+| 跨项目克隆(clone_project) | 把既有项目记忆复制为另一 scope(可带过滤器) |
+
+### 并发与质量
+
+| 名词 | 解释 |
+|---|---|
+| SHARED / EXCLUSIVE / UPDATE 锁 | 读共享 / 写排他 / 中间态(先读后升级写)三档锁 |
+| 排序获取(acquire_many) | 多锁按资源名排序获取,从根本上消除循环等待死锁 |
+| 乐观版本检测 | 写时携带 expected/base version,CAS 风格比对;不符报 VERSION_STALE / WRITE_WRITE |
+| LWW / AUTO_LAST | Last-Write-Wins,冲突默认解法:后写覆盖 |
+| WriteStatus.CONFLICT | 写入被拒(策略为 reject/manual 且检出冲突),不落库 |
+| 矛盾检测 | VALUE(逆谓词)/NUMERIC(数值重叠)/TEMPORAL(时间重叠)/CAUSAL(因果环)四类 |
+| ScopePromoter | 检测"多项目重复模式"并提升到 global(带最小项目数阈值) |
+
+### 服务与集成
+
+| 名词 | 解释 |
+|---|---|
+| MCP | Model Context Protocol,Agent 工具接入协议;本项目暴露 memory_recall/write/init_project/stats 四工具 |
+| stdio / streamable-http | MCP 两种传输:子进程标准输入输出 / HTTP 常驻端点(/mcp) |
+| Web 面板 | 只读管理页(概览/浏览/召回测试);写入统一走 MCP 工具 |
+| config.toml | `~/.smilex/config.toml`,服务化配置(db/embedder/reranker/fact_extractor 等) |
+| doctor | CLI 环境自检命令 |
+
+### Benchmark 术语
+
+| 名词 | 解释 |
+|---|---|
+| LongMemEval / LoCoMo | 两个公开长期记忆评测集(500 题 / 10 长对话 1986 题) |
+| 自家口径 vs mem0 口径 | 前者严判分、奖励正确拒答;后者对齐 mem0 官方协议(禁止拒答、宽松判卷),分数可与 mem0 公布值直接比 |
+| cutoff | mem0 协议中"取检索结果前 N 条作答"的截断点(10/20/50/200),各自独立作答+判卷 |
+| headline | 主指标 = 最大 cutoff(200)的得分 |
+| R@10 | 检索命中率:gold 证据是否出现在 top-10 检索结果里(retrieval_baseline,无 LLM) |
+| answerer / judge | 作答模型 / 判卷模型(环境变量独立配置,可混搭) |
+| LLM-as-judge / rejudge | 用 LLM 对比作答与 gold 判对错;rejudge.py 为离线重判工具(修 judge 空判卷,免重新灌入) |
+| BGE-M3 | 多语言嵌入模型(1024 维),本项目默认语义检索底座 |
+| GLM / glm-5.3-flash | 智谱大模型;benchmark 默认作答+判卷模型(对应 mem0 的 gpt-5 位置) |
 
