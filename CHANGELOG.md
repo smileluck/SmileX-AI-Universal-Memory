@@ -6,6 +6,8 @@
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-09-04
+
 ### Added
 
 - **FTS5 BM25 关键词双通道检索**(schema v13): L1 检索在向量 KNN 之外
