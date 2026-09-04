@@ -2,7 +2,8 @@
 
 三类数据源统一为 ImportSource,产出 ImportResult:
 - markdown: 文件/目录批量,复用 readme_parser 规则提取(大文件按行分块),
-  每个文件额外写一条 L1 时序记忆(fragment_id="md:{相对路径}" 幂等)
+  每个文件额外写一条 L1 时序记忆(fragment_id="md:{相对路径}" 幂等);
+  目录扫描跳过依赖/构建/隐藏目录(EXCLUDED_DIRS),受 max_files 截断
 - git: `git log` CLI 子进程(不引 GitPython,EXECUTION_PLAN_GAPS 约束)解析提交历史,
   提交消息 → L1 时序记忆(fragment_id="git:{仓库}:{hash}" 幂等),
   作者 → person 实体 + contributes_to 三元组,改动文件 → object 实体 +
@@ -42,6 +43,17 @@ _MAX_COMMIT_FILES_IN_CONTENT = 20
 # Markdown 时序记忆内容截断长度
 _MAX_FRAGMENT_CHARS = 4000
 
+# markdown 目录扫描跳过的目录段(依赖/构建产物/工具缓存;隐藏目录一律跳过)
+EXCLUDED_DIRS = frozenset({
+    ".git", ".smilex", "node_modules", ".venv", "venv", ".build", "dist",
+    "build", "site-packages", "__pycache__", ".idea", ".vscode",
+})
+
+
+def _in_excluded_dir(rel: Path) -> bool:
+    """相对路径是否位于忽略目录内(任一目录段命中忽略集或以 . 开头)."""
+    return any(p in EXCLUDED_DIRS or p.startswith(".") for p in rel.parts[:-1])
+
 
 class ImportKind(StrEnum):
     """导入数据源类型(04-layer3 §2.5,MVP 实现前三种)."""
@@ -63,6 +75,7 @@ class ImportSource:
         max_commits: git 导入的提交数上限(None = 全部)
         since: git log --since 过滤(如 "2026-01-01")
         resume: 存在同名断点时是否续传(仅 git 分批生效)
+        max_files: markdown 目录扫描的文件数上限(超出截断并记入 errors)
     """
 
     kind: ImportKind
@@ -72,6 +85,7 @@ class ImportSource:
     max_commits: int | None = None
     since: str | None = None
     resume: bool = True
+    max_files: int = 500
 
     def __post_init__(self) -> None:
         if not self.subject:
@@ -168,7 +182,10 @@ class BulkImporter:
         assert source.path is not None
         root = Path(source.path)
         if root.is_dir():
-            files = sorted(root.rglob("*.md"))
+            files = sorted(
+                f for f in root.rglob("*.md")
+                if not _in_excluded_dir(f.relative_to(root))
+            )
         elif root.is_file():
             files = [root]
         else:
@@ -176,6 +193,12 @@ class BulkImporter:
         base = root if root.is_dir() else root.parent
 
         result = ImportResult(kind=source.kind, scope=scope)
+        if len(files) > source.max_files:
+            result.errors.append(
+                f"markdown 文件数 {len(files)} 超过 max_files={source.max_files},"
+                f"仅导入前 {source.max_files} 个(可缩小 path 范围或调大 max_files)"
+            )
+            files = files[:source.max_files]
         seeds = ExtractionResult()
         for path in files:
             rel = path.relative_to(base).as_posix()

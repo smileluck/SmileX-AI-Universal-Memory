@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -61,8 +62,10 @@ async def test_init_project(service):
         "memory_init_project",
         {"name": "demo", "tech_stack": ["python", "sqlite"]},
     )
-    assert resp["scope"].startswith("project:")
-    assert resp["entity_count"] >= 1
+    assert resp["init"]["scope"].startswith("project:")
+    assert resp["init"]["entity_count"] >= 1
+    assert resp["project_path"] is None
+    assert resp["skipped"] == ["扫描跳过: 未提供 project_path"]
 
 
 async def test_stats(service):
@@ -91,3 +94,45 @@ async def test_bad_scope_rejected(service):
             "memory_write",
             {"content": "x", "scope": "invalid-scope", "session_id": "s3"},
         )
+
+
+async def test_init_project_scan_with_path(service, tmp_path):
+    """project_path → 服务端扫描: README 自动读取 + markdown 导入 + skipped 明细."""
+    server = create_mcp_server(service)
+    (tmp_path / "README.md").write_text("# Demo\nBuilt with FastAPI.\n", encoding="utf-8")
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    (docs / "a.md").write_text("# A\nUses Redis.\n", encoding="utf-8")
+
+    resp = await _call(
+        server, "memory_init_project",
+        {"name": "demo", "project_path": str(tmp_path)},
+    )
+    assert resp["project_path"] == str(tmp_path)
+    assert resp["init"]["scope"].startswith("project:")
+    assert resp["imports"]["markdown"]["memory_count"] == 2
+    assert any("无 .git" in s for s in resp["skipped"])
+
+
+async def test_init_project_stdio_infers_root(tmp_path):
+    """stdio 模式 + db 在 <项目根>/.smilex/memory.db → project_path 自动推断."""
+    from smilex.server.mcp_server import _infer_project_root
+
+    root = tmp_path / "proj"
+    (root / ".smilex").mkdir(parents=True)
+    (root / "README.md").write_text("# P\n", encoding="utf-8")
+
+    svc = MemoryService(
+        ServerConfig(db_path=root / ".smilex" / "memory.db"), mode="stdio"
+    )
+    try:
+        server = create_mcp_server(svc)
+        resp = await _call(server, "memory_init_project", {"name": "proj"})
+        assert resp["project_path"] == str(root.resolve())
+        assert resp["imports"]["markdown"]["memory_count"] == 1
+    finally:
+        await svc.close()
+
+    # 形状守卫: 全局默认库(~/.smilex)与非 .smilex 形状不推断
+    assert _infer_project_root(Path.home() / ".smilex" / "memory.db") is None
+    assert _infer_project_root(Path("/tmp/x/memory.db")) is None

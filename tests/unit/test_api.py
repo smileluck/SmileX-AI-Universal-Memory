@@ -22,6 +22,20 @@ def client(tmp_path):
         yield c
 
 
+def _insert_fragment(db, frag_id: str, content: str, layer: str = "L1") -> None:
+    """直接落库一条 fragment(触发器自动同步 FTS 索引)."""
+    import sqlite3
+
+    with sqlite3.connect(db) as conn:
+        conn.execute(
+            "INSERT INTO temporal_fragments(id, fragment_id, time_start, content, "
+            "entities, relations, scope, layer, importance, created_at, updated_at) "
+            "VALUES (?, ?, '2025-01-01T00:00:00Z', ?, '[]', '[]', 'project:demo', "
+            "?, 0.5, '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z')",
+            (frag_id, frag_id, content, layer),
+        )
+
+
 def test_index_page(client):
     resp = client.get("/")
     assert resp.status_code == 200
@@ -38,17 +52,7 @@ def test_stats_empty(client):
 
 def test_memories_browse_and_detail(client, tmp_path):
     """写入一条 fragment(直接落库)后,浏览/详情端点可见."""
-    import sqlite3
-
-    db = tmp_path / "panel_test.db"
-    with sqlite3.connect(db) as conn:
-        conn.execute(
-            "INSERT INTO temporal_fragments(id, fragment_id, time_start, content, "
-            "entities, relations, scope, layer, importance, created_at, updated_at) "
-            "VALUES ('frag1', 'frag1', '2025-01-01T00:00:00Z', "
-            "'面板浏览测试内容', '[]', '[]', 'project:demo', 'L1', 0.5, "
-            "'2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z')"
-        )
+    _insert_fragment(tmp_path / "panel_test.db", "frag1", "面板浏览测试内容")
 
     resp = client.get("/api/memories", params={"q": "面板浏览"})
     assert resp.status_code == 200
@@ -78,3 +82,51 @@ def test_tasks_endpoint(client):
     resp = client.get("/api/tasks")
     assert resp.status_code == 200
     assert resp.json() == []
+
+
+def test_health(client, tmp_path):
+    data = client.get("/api/health").json()
+    assert data["status"] == "ok"
+    assert data["uptime_s"] >= 0
+    assert "started_at" in data
+    cfg = data["config"]
+    assert cfg["embedder"] == "hash"
+    assert cfg["enable_scheduler"] is False
+    assert str(tmp_path / "panel_test.db") in cfg["db_path"]
+
+
+def test_stats_extended_keys(client):
+    data = client.get("/api/stats").json()
+    assert data["l0_snapshots"] == 0
+    assert data["causal_chains"] == 0
+    assert data["db_size_bytes"] > 0
+
+
+def test_memories_short_query_likes_fallback(client, tmp_path):
+    """<3 字符的关键词不走 FTS(trigram 需 ≥3 字符),LIKE 回退仍可命中."""
+    _insert_fragment(tmp_path / "panel_test.db", "frag2", "短词回退验证")
+    rows = client.get("/api/memories", params={"q": "短词"}).json()
+    assert len(rows) == 1 and rows[0]["id"] == "frag2"
+
+
+def test_memories_query_with_quotes(client):
+    """关键词含双引号: MATCH 短语转义后不抛语法错."""
+    resp = client.get("/api/memories", params={"q": '面板"浏览'})
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
+def test_memories_limit(client, tmp_path):
+    db = tmp_path / "panel_test.db"
+    for i in range(3):
+        _insert_fragment(db, f"lim{i}", f"限量测试内容 {i}")
+    rows = client.get("/api/memories", params={"limit": 2}).json()
+    assert len(rows) == 2
+
+
+def test_memories_kind_filter(client, tmp_path):
+    _insert_fragment(tmp_path / "panel_test.db", "kf1", "类型过滤的片段内容")
+    rows = client.get("/api/memories", params={"kind": "triple"}).json()
+    assert rows == []
+    rows = client.get("/api/memories", params={"kind": "fragment"}).json()
+    assert [r["id"] for r in rows] == ["kf1"]

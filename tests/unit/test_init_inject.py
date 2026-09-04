@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 
 from smilex.cli import (
     ADAPTERS,
@@ -85,3 +86,42 @@ def test_guide_idempotent(tmp_path):
 def test_guide_claude_writes_both_files(tmp_path):
     files = ADAPTERS["claude"].guide_files(tmp_path)
     assert {f.name for f in files} == {"CLAUDE.md", "AGENTS.md"}
+
+
+# ---------- init --scan(冷启动 + 扫描导入) ----------
+
+
+def _md_fragments(db_path) -> int:
+    con = sqlite3.connect(db_path)
+    try:
+        return int(
+            con.execute(
+                "SELECT COUNT(*) FROM temporal_fragments WHERE fragment_id LIKE 'md:%'"
+            ).fetchone()[0]
+        )
+    finally:
+        con.close()
+
+
+def test_run_scan_stdio_creates_project_db(tmp_path, monkeypatch):
+    """--scan(stdio 模式): 项目内 .smilex/memory.db 生成初始记忆,重复执行幂等."""
+    from smilex.cli import _run_scan
+    from smilex.server.config import ServerConfig
+
+    (tmp_path / "README.md").write_text("# Demo\nUses FastAPI.\n", encoding="utf-8")
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    (docs / "a.md").write_text("# A\nUses Redis.\n", encoding="utf-8")
+    # 隔离真实 ~/.smilex/config.toml(避免读到本机 embedder 配置)
+    monkeypatch.setattr(
+        "smilex.cli.load_config",
+        lambda *a, **k: ServerConfig(db_path=tmp_path / "global.db"),
+    )
+
+    assert _run_scan(tmp_path, stdio=True) == 0
+    db = tmp_path / ".smilex" / "memory.db"
+    assert db.exists()
+    assert _md_fragments(db) == 2  # README.md + docs/a.md
+
+    _run_scan(tmp_path, stdio=True)  # 重复执行: 幂等不翻倍
+    assert _md_fragments(db) == 2

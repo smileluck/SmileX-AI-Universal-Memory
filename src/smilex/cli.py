@@ -3,7 +3,8 @@
 命令:
 - serve:   全局常驻 HTTP 服务(MCP streamable-http + Web 面板)
 - mcp:     stdio MCP 模式(项目独立库场景)
-- init:    一键注入 MCP 配置到 Agent 工具的项目(Kimi Code / Claude Code)
+- init:    一键注入 MCP 配置到 Agent 工具的项目(Kimi Code / Claude Code);
+           --scan 时冷启动并扫描项目(README/git 历史/markdown)生成初始记忆
 - doctor:  环境自检(配置 / db / 端口 / 服务可达性)
 
 安装: pip install 'smilex-ai-memory[server]'
@@ -33,7 +34,8 @@ _GUIDE_TEXT = f"""
 
 - **回答涉及项目事实、历史决策、个人偏好的问题前**,先调 `memory_recall(query)` 获取上下文
 - **任务完成或得到新结论后**,调 `memory_write(content, entities?, relations?)` 沉淀
-- 首次接触本项目时调 `memory_init_project(name)` 完成冷启动
+- 首次接触本项目时调 `memory_init_project(name, project_path="<项目根>")` 完成冷启动:
+  自动读 README + 导入 git 历史/markdown 文档为初始记忆(幂等;stdio 模式可省略 project_path)
 - 同一对话内保持相同 session_id(默认 "default")
 """.strip()
 
@@ -164,6 +166,46 @@ def _cmd_mcp(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_scan(project_dir: Path, *, stdio: bool) -> int:
+    """冷启动 + 扫描导入(README/git 历史/markdown → 初始记忆).
+
+    db 选择与注入的 MCP 条目一致: stdio 模式写项目内 ``<dir>/.smilex/memory.db``,
+    HTTP 模式直接写全局库(跨进程写入,建议服务空闲时执行)。
+    """
+    from .server.mcp_server import build_middleware
+
+    config = load_config()
+    db_path = (
+        project_dir / ".smilex" / "memory.db" if stdio else config.resolved_db_path()
+    )
+    if not stdio:
+        print(f"\n注意: --scan(HTTP 模式)直接写入全局库 {db_path},建议服务空闲时执行")
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+
+    async def _run() -> dict:
+        mw = build_middleware(config, db_path=db_path)
+        try:
+            await mw.initialize()
+            return await mw.bootstrap_project(project_dir.name, project_path=project_dir)
+        finally:
+            await mw.close()
+
+    result = asyncio.run(_run())
+    init = result["init"]
+    print(f"\n项目冷启动: scope={init['scope']} 实体={init['entity_count']} "
+          f"三元组={init['triple_count']} 阶段={init['stage']}")
+    for reason in result["skipped"]:
+        print(f"跳过: {reason}", file=sys.stderr)
+    for kind, imp in result["imports"].items():
+        print(f"[{kind}] 新记忆 {imp['memory_count']} / 跳过 {imp['skipped_count']}"
+              f"(源条目 {imp['source_count']}),实体 {imp['entity_count']},"
+              f"三元组 {imp['triple_count']},耗时 {imp['elapsed_ms']}ms")
+        for err in imp["errors"]:
+            print(f"[{kind}] 警告: {err}", file=sys.stderr)
+    print(f"数据库: {db_path}")
+    return 0
+
+
 def _cmd_init(args: argparse.Namespace) -> int:
     project_dir = Path(args.project_dir).resolve()
     if not project_dir.is_dir():
@@ -185,6 +227,9 @@ def _cmd_init(args: argparse.Namespace) -> int:
         for name in tools:
             for path in inject_guide(project_dir, ADAPTERS[name].guide_files(project_dir)):
                 print(f"[{name}] 已追加使用约定: {path}")
+
+    if args.scan:
+        _run_scan(project_dir, stdio=args.stdio)
 
     if not args.stdio:
         print(f"\n指向全局服务: {url}(先启动 smilex-memory serve)")
@@ -251,6 +296,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_init.add_argument(
         "--guide", action="store_true", help="同时向 AGENTS.md/CLAUDE.md 追加使用约定"
+    )
+    p_init.add_argument(
+        "--scan", action="store_true",
+        help="冷启动并扫描项目(README/git 历史/markdown)生成初始记忆",
     )
     p_init.set_defaults(func=_cmd_init)
 

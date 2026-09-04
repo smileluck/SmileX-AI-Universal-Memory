@@ -87,6 +87,12 @@ smilex-memory init <项目目录> --guide   # 一键注入 MCP 配置 + 记忆�
 # 方式二: 项目级 stdio — 独立库 <项目>/.smilex/memory.db
 smilex-memory init <项目目录> --stdio
 
+# 初始化即扫描: 冷启动 + 自动读 README + 导入 git 历史/markdown 文档为初始记忆
+# (幂等可重跑;跳过 node_modules/.venv 等目录,stdio 模式写入项目内 .smilex/memory.db)
+smilex-memory init <项目目录> --stdio --scan
+# agent 侧等价: MCP 工具 memory_init_project(name, project_path="<项目根>")
+# (stdio 模式 project_path 可省略,自动按 db 路径推断项目根)
+
 # 环境自检
 smilex-memory doctor
 ```
@@ -97,7 +103,11 @@ smilex-memory doctor
 - Linux: `scripts/register-service-linux.sh`(`--uninstall` 卸载,systemd --user)
 - macOS: `scripts/register-service-macos.sh`(`--uninstall` 卸载,launchd)
 
-Web 面板为只读(概览统计 / 记忆浏览 / 召回测试);写入统一走 MCP 工具
+Web 面板(`http://127.0.0.1:8765/`)为只读,零依赖纯静态、可离线:
+概览(统计卡 / L0-L3 分层叠条 / scope 分布 / 调度任务进度,15s 自动刷新)、
+记忆浏览(FTS5 关键词搜索 + 类型/层/scope 过滤,行点击看全字段详情)、
+召回测试(可调 top_k / session_id / token_budget,来源含分数条与片段);
+另提供 `/api/health` 健康检查。写入统一走 MCP 工具
 (`memory_recall` / `memory_write` / `memory_init_project` / `memory_stats`)。
 详见 [Server 层设计](docs/design/modules/13-server-layer.md)。
 

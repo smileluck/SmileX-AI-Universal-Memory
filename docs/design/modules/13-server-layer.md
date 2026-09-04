@@ -63,8 +63,16 @@ middlewares → memory(Layer 0-5,不感知 server 层存在)
 
 路由顺序即优先级:
 
-1. `/api/*` — 只读 JSON API(stats / memories / memory/{id} / recall-test / tasks)
-2. `/` + `/static/*` — Web 面板(`server/panel/`,vanilla JS 三标签:概览/浏览/召回测试)
+1. `/api/*` — 只读 JSON API(health / stats / memories / memory/{id} / recall-test / tasks)
+   - `GET /api/health`:started_at / uptime_s / 配置摘要(embedder、调度器开关等)
+   - `GET /api/stats`:各层计数 + l0_snapshots / causal_chains / db_size_bytes
+   - `GET /api/memories`:关键词 `q`(≥3 字符走 FTS5 trigram BM25 排序,短词/异常回退
+     LIKE)、`kind`(fragment/entity/triple)、`layer`、`scope`、`limit` 过滤
+   - `GET /api/memory/{id}`:单条全字段详情(BLOB 值替换为 `<binary N bytes>`)
+   - `POST /api/recall-test`:query / top_k / session_id / token_budget
+2. `/` + `/static/*` — Web 面板(`server/panel/`,vanilla JS 三标签:概览/浏览/召回测试;
+   「记忆地层学」暗色视觉,L0-L3 层色贯穿徽标与分层叠条,tab 状态与自动刷新开关存
+   localStorage,15s 自动刷新且页面隐藏时暂停)
 3. `Mount("/")` — MCP 子应用(内部路径 `/mcp`),兜底挂载
 
 lifespan:启动时初始化 MemoryService(早暴露 db 错误)→ 可选调度器

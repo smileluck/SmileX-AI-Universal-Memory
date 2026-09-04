@@ -93,6 +93,21 @@ _LAYER_MAP: dict[str, MemoryLayer] = {
 # MemoryRef.snippet 截断长度
 _SNIPPET_MAX_CHARS = 120
 
+# 项目根 README 文件名候选(大小写两档,取第一个命中)
+_README_GLOBS = ("README*.md", "readme*.md")
+
+
+def _find_readme(root: Path) -> str | None:
+    """读项目根 README 内容;无匹配或读取失败返回 None(冷启动降级继续)."""
+    for pattern in _README_GLOBS:
+        matches = sorted(root.glob(pattern))
+        if matches:
+            try:
+                return matches[0].read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                return None
+    return None
+
 
 class _RelationConflictError(Exception):
     """relation 写入被 Layer 4 冲突策略拒绝(write 内部捕获 → CONFLICT 响应)."""
@@ -236,6 +251,102 @@ class MemoryMiddleware:
             stage=ctx.stage,
             elapsed_ms=int((time.monotonic() - start) * 1000),
         )
+
+    # ==================== M.2a 冷启动 + 扫描导入(README/git/markdown) ====================
+
+    async def bootstrap_project(
+        self,
+        name: str,
+        *,
+        project_path: str | Path | None = None,
+        description: str = "",
+        tech_stack: list[str] | None = None,
+        readme_content: str | None = None,
+        scan_git: bool = True,
+        scan_markdown: bool = True,
+        max_commits: int | None = None,
+    ) -> dict:
+        """项目初始化 = 冷启动 + 扫描生成初始记忆(MCP/CLI 共用编排).
+
+        initialize_project 建立项目 scope(同名复用)后,对 project_path
+        依次导入 git 历史 / markdown 文档(README 缺省时自动从项目根读取);
+        单源失败(如目录无 .git、git 不可用)记入 skipped 继续执行.
+
+        Args:
+            name: 项目名(scope 复用与种子挂载的主体)
+            project_path: 项目根目录;None 时只做冷启动不扫描
+            readme_content: README 文本;None 且有 project_path 时自动读取
+            scan_git / scan_markdown: 是否导入对应数据源
+            max_commits: git 导入提交数上限(None = 全部)
+
+        Returns:
+            {"init": ProjectInitResponse, "imports": {kind: ImportResult},
+             "skipped": [原因...], "project_path": str | None}
+        """
+        self._require_initialized()
+        root = None
+        if project_path is not None:
+            root = Path(project_path).expanduser().resolve()
+            if not root.is_dir():
+                raise ValueError(f"project_path 不是有效目录: {root}")
+        if readme_content is None and root is not None:
+            readme_content = _find_readme(root)
+
+        init = await self.initialize_project(
+            ProjectInitRequest(
+                name=name,
+                description=description,
+                tech_stack=list(tech_stack or []),
+                readme_content=readme_content,
+            )
+        )
+
+        from ..memory.scheduler.bootstrap.bulk_importer import (  # 延迟导入: 同 initialize
+            ImportKind,
+            ImportSource,
+        )
+
+        imports: dict[str, dict] = {}
+        skipped: list[str] = []
+        if root is None:
+            if scan_git or scan_markdown:
+                skipped.append("扫描跳过: 未提供 project_path")
+        else:
+            sources: list[tuple[str, ImportSource]] = []
+            if scan_git:
+                if (root / ".git").exists():
+                    sources.append((
+                        "git",
+                        ImportSource(
+                            kind=ImportKind.GIT,
+                            subject=name,
+                            path=str(root),
+                            max_commits=max_commits,
+                        ),
+                    ))
+                else:
+                    skipped.append("git: 目录无 .git")
+            if scan_markdown:
+                sources.append((
+                    "markdown",
+                    ImportSource(
+                        kind=ImportKind.MARKDOWN, subject=name, path=str(root)
+                    ),
+                ))
+            for kind_label, source in sources:
+                try:
+                    imports[kind_label] = (
+                        await self.import_source(source)
+                    ).to_dict()
+                except Exception as exc:  # 单源失败不中断其他源
+                    skipped.append(f"{kind_label}: {exc}")
+
+        return {
+            "init": init.to_dict(),
+            "imports": imports,
+            "skipped": skipped,
+            "project_path": str(root) if root is not None else None,
+        }
 
     # ==================== M.2b 批量导入 / 种子注入(P1-b,§9.5.2 步骤 3/4) ====================
 

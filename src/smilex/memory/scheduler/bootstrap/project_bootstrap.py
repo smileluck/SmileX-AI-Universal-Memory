@@ -77,11 +77,19 @@ class ProjectBootstrap:
     ) -> ProjectContext:
         """新项目冷启动: 创建 project scope + 写入初始实体/三元组.
 
+        同名项目复用既有 scope(项目实体 entity_id 全局稳定为
+        "project:{归一名}",取其所在 scope): 重复冷启动/批量导入不产生
+        重复 scope,时序记忆按 (scope, fragment_id) 的幂等去重才能生效.
+
         Returns:
             ProjectContext(scope 全路径 "project:{ulid}", stage, 计数)
         """
-        project_id = generate_id()
-        scope = f"project:{project_id}"
+        cursor = await self._storage.conn.execute(
+            "SELECT scope FROM entities WHERE entity_id = ? AND valid_to IS NULL LIMIT 1",
+            [f"project:{normalize_name(request.name)}"],
+        )
+        row = await cursor.fetchone()
+        scope = str(row[0]) if row else f"project:{generate_id()}"
 
         # [1] 初始化向导: 项目实体 + 描述 + 技术栈
         result = ExtractionResult()

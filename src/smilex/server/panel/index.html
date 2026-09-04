@@ -3,64 +3,145 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>SmileX Memory 面板</title>
+  <title>SmileX Memory · 记忆面板</title>
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-  <header>
-    <h1>SmileX Memory</h1>
-    <nav>
-      <button class="tab active" data-tab="overview">概览</button>
-      <button class="tab" data-tab="browse">记忆浏览</button>
-      <button class="tab" data-tab="recall">召回测试</button>
-    </nav>
-  </header>
+<header class="topbar">
+  <div class="brand">
+    <svg class="brand-mark" width="22" height="22" viewBox="0 0 22 22" aria-hidden="true">
+      <rect x="1" y="1.5" width="20" height="3.5" rx="1" fill="var(--l0)"/>
+      <rect x="3" y="6.5" width="16" height="3.5" rx="1" fill="var(--l1)" opacity=".9"/>
+      <rect x="5" y="11.5" width="12" height="3.5" rx="1" fill="var(--l2)" opacity=".85"/>
+      <rect x="7" y="16.5" width="8" height="3.5" rx="1" fill="var(--l3)" opacity=".8"/>
+    </svg>
+    <span class="brand-name">SmileX Memory</span>
+  </div>
+  <nav class="tabs">
+    <button class="tab active" data-tab="overview">概览</button>
+    <button class="tab" data-tab="browse">记忆浏览</button>
+    <button class="tab" data-tab="recall">召回测试</button>
+  </nav>
+  <div class="top-status">
+    <span id="health-pill" class="pill" title=""><span class="dot"></span>连接中…</span>
+    <button id="auto-refresh" class="switch" type="button" aria-pressed="true"
+      title="概览每 15 秒自动刷新">自动刷新</button>
+  </div>
+</header>
 
-  <main>
-    <section id="tab-overview" class="panel active">
-      <h2>统计概览</h2>
-      <div id="stats-cards" class="cards">加载中…</div>
+<main>
+  <!-- 概览 -->
+  <section id="tab-overview" class="panel active">
+    <div class="section-head">
+      <h2>统计</h2>
+      <span id="stats-meta" class="meta"></span>
+    </div>
+    <div id="stats-cards" class="cards">加载中…</div>
+
+    <div class="section-head">
+      <h2>分层结构</h2>
+      <span class="meta">时序片段按层分布</span>
+    </div>
+    <div id="strata"></div>
+
+    <div class="section-head">
+      <h2>scope 分布</h2>
+      <span class="meta">实体按作用域 · 点击进入浏览</span>
+    </div>
+    <div id="scopes"></div>
+
+    <div class="section-head">
       <h2>调度任务</h2>
+      <span class="meta">最近断点记录</span>
+    </div>
+    <div class="table-wrap">
       <table id="tasks-table">
-        <thead><tr><th>任务</th><th>进度</th><th>步数</th><th>更新时间</th></tr></thead>
+        <thead><tr><th>任务</th><th class="w-progress">进度</th><th>步数</th><th>更新</th></tr></thead>
         <tbody></tbody>
       </table>
-    </section>
+    </div>
+  </section>
 
-    <section id="tab-browse" class="panel">
-      <form id="browse-form">
-        <input name="q" placeholder="关键词(内容/名称/谓词)">
-        <select name="layer">
-          <option value="">全部层</option>
-          <option value="L0">L0 工作记忆</option>
-          <option value="L1">L1 短时</option>
-          <option value="L2">L2 长时</option>
-          <option value="L3">L3 语义社区</option>
-        </select>
-        <input name="scope" placeholder="scope(如 project:demo,可空)">
-        <button type="submit">搜索</button>
-      </form>
+  <!-- 记忆浏览 -->
+  <section id="tab-browse" class="panel">
+    <form id="browse-form" class="form-row">
+      <input name="q" placeholder="关键词(中文子串可命中,FTS5)">
+      <select name="kind">
+        <option value="">全部类型</option>
+        <option value="fragment">片段</option>
+        <option value="entity">实体</option>
+        <option value="triple">三元组</option>
+      </select>
+      <select name="layer">
+        <option value="">全部层</option>
+        <option value="L0">L0 工作记忆</option>
+        <option value="L1">L1 短时</option>
+        <option value="L2">L2 长时</option>
+        <option value="L3">L3 语义社区</option>
+      </select>
+      <input name="scope" placeholder="scope(可空)">
+      <select name="limit">
+        <option>50</option>
+        <option>100</option>
+        <option>200</option>
+        <option>500</option>
+      </select>
+      <button type="submit" class="btn">搜索</button>
+    </form>
+    <div class="table-wrap">
       <table id="memories-table">
-        <thead><tr><th>类型</th><th>内容</th><th>scope</th><th>层</th><th>重要性</th><th>更新时间</th></tr></thead>
+        <thead>
+          <tr><th>类型</th><th>内容</th><th>scope</th><th>层</th>
+              <th class="w-importance">重要性</th><th>更新</th></tr>
+        </thead>
         <tbody></tbody>
       </table>
-    </section>
+    </div>
+    <p class="hint">点击任意行查看完整字段</p>
+  </section>
 
-    <section id="tab-recall" class="panel">
-      <form id="recall-form">
-        <input name="query" placeholder="输入查询,测试召回效果" required>
-        <input name="top_k" type="number" value="10" min="1" max="50" title="top_k">
-        <button type="submit">召回</button>
-      </form>
-      <div id="recall-meta"></div>
+  <!-- 召回测试 -->
+  <section id="tab-recall" class="panel">
+    <form id="recall-form" class="form-row">
+      <input name="query" placeholder="输入查询,测试召回效果" required>
+      <input name="top_k" type="number" value="10" min="1" max="50" title="返回条数 top_k">
+      <input name="session_id" value="panel-debug" title="会话 ID(影响 L0 会话记忆命中)">
+      <input name="token_budget" type="number" min="100" step="100"
+        placeholder="token 预算(默认服务配置)" title="上下文 token 预算">
+      <button type="submit" class="btn" id="recall-submit">召回</button>
+    </form>
+    <div id="recall-meta" class="recall-meta"></div>
+    <div id="recall-result" hidden>
+      <div class="context-head">
+        <span>召回上下文</span>
+        <button id="copy-context" type="button" class="btn subtle">复制</button>
+      </div>
       <pre id="recall-context"></pre>
+    </div>
+    <div class="table-wrap">
       <table id="recall-sources">
-        <thead><tr><th>memory_id</th><th>层</th><th>score</th></tr></thead>
-        <tbody></tbody>
+        <thead>
+          <tr><th>层</th><th>memory_id</th><th>scope</th>
+              <th class="w-score">score</th><th>片段</th></tr>
+        </thead>
+        <tbody>
+          <tr class="empty-row"><td colspan="5">提交查询后,这里显示召回来源明细</td></tr>
+        </tbody>
       </table>
-    </section>
-  </main>
+    </div>
+  </section>
+</main>
 
-  <script src="/static/app.js"></script>
+<!-- 记忆详情抽屉 -->
+<div id="scrim" class="scrim" hidden></div>
+<aside id="drawer" class="drawer" aria-hidden="true" aria-label="记忆详情">
+  <div class="drawer-head">
+    <span id="drawer-title" class="drawer-title"></span>
+    <button id="drawer-close" type="button" class="btn subtle">关闭 · Esc</button>
+  </div>
+  <dl id="drawer-body" class="drawer-body"></dl>
+</aside>
+
+<script src="/static/app.js"></script>
 </body>
 </html>

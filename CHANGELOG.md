@@ -18,6 +18,16 @@
   core 保持零 LLM): `FactExtractor` Protocol + `LLMFactExtractor`,
   长块拆原子事实逐条入库,失败降级回原文;抽取模式下事实可跳过 L0
   直送 L1(`facts_bypass_l0`)
+- **初始化即扫描生成初始记忆**: `MemoryMiddleware.bootstrap_project()`
+  编排冷启动 + 扫描(README 自动读取 + git 历史 + markdown 文档 →
+  L1 记忆与实体/三元组种子);MCP `memory_init_project` 新增
+  `project_path/scan_git/scan_markdown/max_commits` 参数(stdio 模式
+  project_path 可按 db 路径自动推断),CLI `smilex-memory init --scan`
+  一键完成(stdio 写项目内库,HTTP 直写全局库)
+- **冷启动 scope 按项目名复用**: 同名项目重复 `initialize_project`
+  不再新建 scope(按稳定 entity_id 查回),重复初始化/扫描幂等
+- markdown 目录扫描忽略规则: 跳过 node_modules/.venv/dist 等依赖与
+  构建目录及隐藏目录;`ImportSource.max_files`(默认 500)截断
 - Benchmark 工具链四套: LongMemEval / LoCoMo(自家严口径)、
   retrieval_baseline(纯检索 R@10,无需 LLM key)、mem0_compat
   (mem0 官方协议对齐口径,含离线 rejudge 工具)

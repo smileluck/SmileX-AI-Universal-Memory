@@ -83,12 +83,13 @@ async def test_initialize_minimal(engine, bootstrap):
     assert "concept:http-api" in entity_ids  # web 模板骨架
 
 
-async def test_initialize_scope_is_unique(bootstrap):
-    """同名项目两次初始化 → 不同 scope(ULID)."""
-    req = ProjectInitRequest(name="demo")
-    ctx1 = await bootstrap.initialize(req)
-    ctx2 = await bootstrap.initialize(req)
-    assert ctx1.scope != ctx2.scope
+async def test_initialize_scope_reused_by_name(bootstrap):
+    """同名项目两次初始化 → 复用同一 scope(扫描导入幂等的根基);异名各建."""
+    ctx1 = await bootstrap.initialize(ProjectInitRequest(name="demo"))
+    ctx2 = await bootstrap.initialize(ProjectInitRequest(name="demo"))
+    ctx3 = await bootstrap.initialize(ProjectInitRequest(name="other"))
+    assert ctx1.scope == ctx2.scope
+    assert ctx3.scope != ctx1.scope
 
 
 async def test_initialize_with_wizard_answers(engine, bootstrap):

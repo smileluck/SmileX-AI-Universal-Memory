@@ -7,7 +7,8 @@
 工具约定(返回 JSON 文本):
 - memory_recall: 检索记忆上下文(回答涉及项目事实/历史决策前先调)
 - memory_write: 沉淀新事实/结论(任务完成、得到新决策时调)
-- memory_init_project: 新项目冷启动(导入 README/git 历史 + 种子)
+- memory_init_project: 新项目冷启动 + 扫描生成初始记忆(README/git 历史/
+  markdown 文档;project_path 缺省时 stdio 模式按 db 路径推断项目根)
 - memory_stats: 各层记忆计数(调试/面板)
 
 session_id: 同一对话会话内保持一致可获得 L0 工作记忆加速;缺省 "default"。
@@ -17,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from ..memory.lifecycle.embedder import EmbedderConfig, get_embedder
@@ -24,7 +26,6 @@ from ..memory.lifecycle.extractor import ExtractorConfig, get_extractor
 from ..memory.lifecycle.reranker import RerankerConfig, get_reranker
 from ..memory.models import MemoryScope, ScopeFilter
 from ..middlewares.dto import (
-    ProjectInitRequest,
     RecallRequest,
     TripleInput,
     WriteRequest,
@@ -56,8 +57,11 @@ class MemoryService:
     单进程单实例 = 单写者,与 SQLite 引擎假设一致;初始化并发由锁保护。
     """
 
-    def __init__(self, config: ServerConfig) -> None:
+    def __init__(self, config: ServerConfig, *, mode: str = "http") -> None:
         self._config = config
+        # "stdio" = 项目独立库(smilex-memory mcp --db <项目>/.smilex/memory.db),
+        # "http" = 全局常驻服务;影响 memory_init_project 的项目根推断
+        self.mode = mode
         self._memory: MemoryMiddleware | None = None
         self._lock = asyncio.Lock()
 
@@ -71,17 +75,7 @@ class MemoryService:
             return self._memory
         async with self._lock:
             if self._memory is None:
-                embedder = get_embedder(EmbedderConfig(backend=self._config.embedder))
-                reranker = get_reranker(RerankerConfig(backend=self._config.reranker))
-                extractor = get_extractor(
-                    ExtractorConfig(backend=self._config.fact_extractor)
-                )
-                memory = MemoryMiddleware(
-                    self._config.resolved_db_path(),
-                    embedder=embedder,
-                    reranker=reranker,
-                    fact_extractor=extractor,
-                )
+                memory = build_middleware(self._config)
                 await memory.initialize()
                 self._memory = memory
         return self._memory
@@ -90,6 +84,33 @@ class MemoryService:
         if self._memory is not None:
             await self._memory.close()
             self._memory = None
+
+
+def build_middleware(config: ServerConfig, db_path: Path | None = None) -> MemoryMiddleware:
+    """按 ServerConfig 组装 MemoryMiddleware(MemoryService 与 CLI --scan 共用)."""
+    embedder = get_embedder(EmbedderConfig(backend=config.embedder))
+    reranker = get_reranker(RerankerConfig(backend=config.reranker))
+    extractor = get_extractor(ExtractorConfig(backend=config.fact_extractor))
+    return MemoryMiddleware(
+        db_path if db_path is not None else config.resolved_db_path(),
+        embedder=embedder,
+        reranker=reranker,
+        fact_extractor=extractor,
+    )
+
+
+def _infer_project_root(db_path: Path) -> Path | None:
+    """stdio 模式从 db 路径 ``<项目根>/.smilex/memory.db`` 推断项目根.
+
+    全局默认库 ``~/.smilex/memory.db`` 同样匹配该形状,显式排除(家目录
+    不是项目根);推断结果必须真实存在。
+    """
+    if db_path.parent.name != ".smilex":
+        return None
+    root = db_path.parent.parent
+    if root == Path.home() or not root.is_dir():
+        return None
+    return root
 
 
 def _parse_scope(scope: str | None) -> MemoryScope:
@@ -173,26 +194,41 @@ def create_mcp_server(service: MemoryService) -> MCPServer:
         return json.dumps(resp.to_dict(), ensure_ascii=False)
 
     @server.tool(
-        description="新项目冷启动: 导入 README 摘要/技术栈种子,建立 project scope。"
-        "首次在某项目使用记忆服务时调用一次。"
+        description="新项目冷启动 + 扫描生成初始记忆: 传入 project_path 自动读 README、"
+        "导入 git 历史/markdown 文档为 L1 记忆并建立 project scope(幂等可重跑)。"
+        "首次在某项目使用记忆服务时调用一次;stdio 模式 project_path 可省略。"
     )
     async def memory_init_project(
         name: str,
         description: str = "",
         tech_stack: list[str] | None = None,
         readme_content: str | None = None,
+        project_path: str | None = None,
+        scan_git: bool = True,
+        scan_markdown: bool = True,
+        max_commits: int | None = None,
     ) -> str:
-        """冷启动初始化,返回 scope 与种子统计(JSON)."""
+        """冷启动 + 扫描导入,返回 scope、种子统计与各源导入结果(JSON).
+
+        project_path 缺省时: stdio 模式按 db 路径(<项目根>/.smilex/memory.db)
+        自动推断项目根;HTTP 全局模式不推断,需显式传参。
+        """
         memory = await service.get()
-        resp = await memory.initialize_project(
-            ProjectInitRequest(
-                name=name,
-                description=description,
-                tech_stack=list(tech_stack or []),
-                readme_content=readme_content,
-            )
+        if project_path is None and service.mode == "stdio":
+            inferred = _infer_project_root(service.config.resolved_db_path())
+            if inferred is not None:
+                project_path = str(inferred)
+        result = await memory.bootstrap_project(
+            name,
+            project_path=project_path,
+            description=description,
+            tech_stack=list(tech_stack or []),
+            readme_content=readme_content,
+            scan_git=scan_git,
+            scan_markdown=scan_markdown,
+            max_commits=max_commits,
         )
-        return json.dumps(resp.to_dict(), ensure_ascii=False)
+        return json.dumps(result, ensure_ascii=False)
 
     @server.tool(description="记忆统计: 各层/各 scope 的条目计数(调试与面板用)。")
     async def memory_stats(scope: str | None = None) -> str:
@@ -219,7 +255,7 @@ def create_mcp_server(service: MemoryService) -> MCPServer:
 
 async def run_stdio(config: ServerConfig) -> None:
     """stdio 模式入口(smilex-memory mcp)."""
-    service = MemoryService(config)
+    service = MemoryService(config, mode="stdio")
     server = create_mcp_server(service)
     try:
         await server.run_stdio_async()

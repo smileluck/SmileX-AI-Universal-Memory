@@ -13,6 +13,10 @@
 
 from __future__ import annotations
 
+import shutil
+import subprocess
+from pathlib import Path
+
 import pytest
 
 from smilex.memory.lifecycle.promotion import L0_PROMOTION_THRESHOLD
@@ -75,6 +79,91 @@ async def test_initialize_project(mw):
     assert resp.triple_count > 0
     assert resp.elapsed_ms >= 0
     assert resp.to_dict()["scope"] == resp.scope
+
+
+# ---------- M.2a bootstrap_project(冷启动 + 扫描导入) ----------
+
+needs_git = pytest.mark.skipif(shutil.which("git") is None, reason="git 不可用")
+
+
+def _make_project_dir(tmp_path, *, with_git: bool = False) -> Path:
+    """临时项目: README + docs/*.md(+ 可选 1 个 git 提交)."""
+    (tmp_path / "README.md").write_text(
+        "# Demo 项目\n\nBuilt with FastAPI and SQLite.\n", encoding="utf-8"
+    )
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    (docs / "arch.md").write_text("# 架构\nUses Redis.\n", encoding="utf-8")
+    if with_git:
+        env_git = ["git", "-C", str(tmp_path)]
+        subprocess.run(
+            [*env_git, "-c", "user.email=dev@example.com", "-c", "user.name=Dev",
+             "init"],
+            check=True, capture_output=True,
+        )
+        subprocess.run(
+            [*env_git, "-c", "user.email=dev@example.com", "-c", "user.name=Dev",
+             "commit", "--allow-empty", "-m", "init: bootstrap"],
+            check=True, capture_output=True,
+        )
+    return tmp_path
+
+
+async def _scope_entity_ids(mw: MemoryMiddleware, scope: str) -> set[str]:
+    cursor = await mw.engine.conn.execute(
+        "SELECT entity_id FROM entities WHERE scope = ?", [scope]
+    )
+    return {r["entity_id"] for r in await cursor.fetchall()}
+
+
+async def test_bootstrap_project_scan_without_git(mw, tmp_path):
+    """无 .git 项目: README 自动读取 + markdown 导入,git 源记入 skipped."""
+    root = _make_project_dir(tmp_path)
+    result = await mw.bootstrap_project("demo", project_path=root)
+
+    assert result["project_path"] == str(root)
+    assert result["init"]["scope"].startswith("project:")
+    # README 种子(FastAPI)与 markdown 种子(Redis)都落库
+    ids = await _scope_entity_ids(mw, result["init"]["scope"])
+    assert {"tech:fastapi", "tech:redis"} <= ids
+    # README.md + docs/arch.md 两条 L1 记忆
+    assert result["imports"]["markdown"]["memory_count"] == 2
+    assert "git" not in result["imports"]
+    assert any("无 .git" in s for s in result["skipped"])
+
+
+async def test_bootstrap_project_idempotent(mw, tmp_path):
+    """重复初始化: scope 复用,记忆零新增,scope 总量稳定不翻倍."""
+    root = _make_project_dir(tmp_path)
+    r1 = await mw.bootstrap_project("demo", project_path=root)
+    r2 = await mw.bootstrap_project("demo", project_path=root)
+
+    assert r1["init"]["scope"] == r2["init"]["scope"]
+    md1, md2 = r1["imports"]["markdown"], r2["imports"]["markdown"]
+    assert md2["memory_count"] == 0
+    assert md2["skipped_count"] == md1["memory_count"]
+    # 第一次导入完成后的 scope 总量,第二次 init/markdown 均零新增
+    assert r2["init"]["entity_count"] == md1["entity_count"]
+    assert md2["entity_count"] == md1["entity_count"]
+    assert md2["triple_count"] == md1["triple_count"]
+    # 行级无重复: entity_id 去重后数量一致
+    ids = await _scope_entity_ids(mw, r1["init"]["scope"])
+    assert len(ids) == md1["entity_count"]
+
+
+@needs_git
+async def test_bootstrap_project_scan_git(mw, tmp_path):
+    """git 仓库: 提交历史导入为时序记忆."""
+    root = _make_project_dir(tmp_path, with_git=True)
+    result = await mw.bootstrap_project("demo", project_path=root)
+    git = result["imports"]["git"]
+    assert git["memory_count"] >= 1
+    assert git["source_count"] >= 1
+
+
+async def test_bootstrap_project_rejects_invalid_path(mw, tmp_path):
+    with pytest.raises(ValueError, match="project_path"):
+        await mw.bootstrap_project("demo", project_path=tmp_path / "nope")
 
 
 # ---------- M.3 write ----------

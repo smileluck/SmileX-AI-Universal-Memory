@@ -148,6 +148,42 @@ async def test_import_markdown_chunked(engine, project, tmp_path):
     assert "concept:section-19" in entity_ids
 
 
+async def test_import_markdown_excludes_vendored_dirs(engine, project, tmp_path):
+    """目录扫描跳过依赖/构建/隐藏目录(node_modules/.venv/build/.github 等)."""
+    bootstrap, scope = project
+    (tmp_path / "README.md").write_text("# Demo\nUses FastAPI.\n", encoding="utf-8")
+    for d in ("node_modules/pkg", ".venv/lib", "build/out", ".github/workflows"):
+        vendored = tmp_path / d
+        vendored.mkdir(parents=True)
+        (vendored / "vendor.md").write_text("# vendored doc\n", encoding="utf-8")
+
+    importer = BulkImporter(bootstrap)
+    result = await importer.import_source(
+        scope, ImportSource(kind=ImportKind.MARKDOWN, subject="demo", path=str(tmp_path))
+    )
+    assert result.errors == []
+    assert result.source_count == 1
+    fragments = await _fragments(engine, scope)
+    assert {f["fragment_id"] for f in fragments} == {"md:README.md"}
+
+
+async def test_import_markdown_max_files(engine, project, tmp_path):
+    """文件数超过 max_files: 截断导入并在 errors 记提示."""
+    bootstrap, scope = project
+    for i in range(3):
+        (tmp_path / f"f{i}.md").write_text(f"# F{i}\n", encoding="utf-8")
+    importer = BulkImporter(bootstrap)
+    result = await importer.import_source(
+        scope,
+        ImportSource(
+            kind=ImportKind.MARKDOWN, subject="demo", path=str(tmp_path), max_files=2
+        ),
+    )
+    assert result.memory_count == 2
+    assert len(result.errors) == 1
+    assert "max_files" in result.errors[0]
+
+
 # ---------- 文本批次导入 ----------
 
 

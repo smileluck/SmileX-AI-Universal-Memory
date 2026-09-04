@@ -1,8 +1,10 @@
 """面板 JSON API(server 层)— 只读监控 + 召回调试.
 
 端点:
-- GET  /api/stats        各层/各 scope 计数
-- GET  /api/memories     浏览/关键词搜索(entities/triples/fragments 联合)
+- GET  /api/health       运行状态(uptime + 配置摘要,面板状态区轮询)
+- GET  /api/stats        各层/各 scope 计数 + L0 会话/因果链/库体积
+- GET  /api/memories     浏览/关键词搜索(entities/triples/fragments 联合,
+                         fragments 关键词走 FTS5 BM25,trigram 支持中文子串)
 - GET  /api/memory/{id}  单条详情
 - POST /api/recall-test  召回调试(返回上下文 + 来源 + 耗时)
 - GET  /api/tasks        调度任务断点(最近运行)列表
@@ -12,7 +14,9 @@
 
 from __future__ import annotations
 
+import sqlite3
 import time
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
@@ -34,6 +38,49 @@ class RecallTestBody(BaseModel):
     token_budget: int | None = None
 
 
+def _fts_phrase(q: str) -> str:
+    """用户输入转 FTS5 短语: 双引号包裹,内部引号加倍,防 MATCH 语法错误."""
+    return '"' + q.replace('"', '""') + '"'
+
+
+async def _fetch_fragments(
+    conn: Any, layer: str | None, scope: str | None, q: str | None, limit: int
+) -> list[Any]:
+    """fragments 检索: 关键词 ≥3 字符走 FTS5 trigram(BM25 排序,中文子串可命中),
+    短词或 FTS 不可用(旧库)时回退 LIKE,浏览模式按更新时间倒序."""
+    frag_where, frag_params = "1=1", []
+    if layer:
+        frag_where += " AND tf.layer = ?"
+        frag_params.append(layer)
+    if scope:
+        frag_where += " AND tf.scope = ?"
+        frag_params.append(scope)
+    if q and len(q) >= 3:
+        try:
+            cur = await conn.execute(
+                "SELECT tf.id, tf.content, tf.scope, tf.layer, tf.importance, "
+                "tf.updated_at FROM temporal_fragments tf "
+                "JOIN fts_fragments fts ON fts.rowid = tf.rowid "
+                f"WHERE fts.fts_fragments MATCH ? AND {frag_where} "
+                "ORDER BY fts.rank LIMIT ?",
+                [_fts_phrase(q), *frag_params, limit],
+            )
+            return list(await cur.fetchall())
+        except sqlite3.OperationalError:
+            pass  # FTS 不可用 → LIKE 回退
+    like_where, like_params = frag_where, list(frag_params)
+    if q:
+        like_where += " AND tf.content LIKE ?"
+        like_params.append(f"%{q}%")
+    cur = await conn.execute(
+        "SELECT tf.id, tf.content, tf.scope, tf.layer, tf.importance, tf.updated_at "
+        f"FROM temporal_fragments tf WHERE {like_where} "
+        "ORDER BY tf.updated_at DESC LIMIT ?",
+        [*like_params, limit],
+    )
+    return list(await cur.fetchall())
+
+
 def _require_fastapi() -> None:
     try:
         import fastapi  # noqa: F401
@@ -49,6 +96,24 @@ def create_api_router(service: MemoryService) -> APIRouter:
     from fastapi import APIRouter, Query
 
     router = APIRouter(prefix="/api")
+    started_at = time.time()
+
+    @router.get("/health")
+    async def health() -> dict[str, Any]:
+        c = service.config
+        return {
+            "status": "ok",
+            "started_at": datetime.fromtimestamp(started_at, tz=UTC).isoformat(),
+            "uptime_s": round(time.time() - started_at, 1),
+            "config": {
+                "db_path": str(c.resolved_db_path()),
+                "embedder": c.embedder,
+                "reranker": c.reranker,
+                "fact_extractor": c.fact_extractor,
+                "enable_scheduler": c.enable_scheduler,
+                "token_budget": c.token_budget,
+            },
+        }
 
     @router.get("/stats")
     async def stats(scope: str | None = None) -> dict[str, Any]:
@@ -61,6 +126,14 @@ def create_api_router(service: MemoryService) -> APIRouter:
             result[table] = int((await cur.fetchone())[0])
         cur = await conn.execute("SELECT COUNT(*) FROM vector_links")
         result["vector_links"] = int((await cur.fetchone())[0])
+        for table, key in (
+            ("memory_l0_snapshot", "l0_snapshots"),
+            ("causal_chains", "causal_chains"),
+        ):
+            cur = await conn.execute(f"SELECT COUNT(*) FROM {table}")
+            result[key] = int((await cur.fetchone())[0])
+        db_file = service.config.resolved_db_path()
+        result["db_size_bytes"] = db_file.stat().st_size if db_file.exists() else 0
         # 分层计数(temporal_fragments.layer)
         cur = await conn.execute(
             f"SELECT layer, COUNT(*) AS c FROM temporal_fragments{where} GROUP BY layer",
@@ -83,41 +156,33 @@ def create_api_router(service: MemoryService) -> APIRouter:
         layer: str | None = None,
         scope: str | None = None,
         q: str | None = None,
+        kind: str | None = Query(default=None, pattern="^(fragment|entity|triple)$"),
         limit: int = Query(default=50, ge=1, le=500),
     ) -> list[dict[str, Any]]:
-        """联合浏览: fragments(按 layer)+ entities + triples,关键词 LIKE 过滤."""
+        """联合浏览: fragments(按 layer)+ entities + triples.
+
+        kind 可选过滤(fragment/entity/triple);关键词 q: fragments 走 FTS5
+        trigram(BM25 相关度排序,中文子串可命中),<3 字符或 FTS 不可用时回退
+        LIKE;entities/triples 始终 LIKE。带 q 时结果保持相关度分组顺序,
+        无 q 时按更新时间倒序。
+        """
         memory = await service.get()
         conn = memory.engine.conn
         items: list[dict[str, Any]] = []
 
-        frag_where, frag_params = "1=1", []
-        if layer:
-            frag_where += " AND layer = ?"
-            frag_params.append(layer)
-        if scope:
-            frag_where += " AND scope = ?"
-            frag_params.append(scope)
-        if q:
-            frag_where += " AND content LIKE ?"
-            frag_params.append(f"%{q}%")
-        cur = await conn.execute(
-            "SELECT id, content, scope, layer, importance, updated_at "
-            f"FROM temporal_fragments WHERE {frag_where} "
-            "ORDER BY updated_at DESC LIMIT ?",
-            [*frag_params, limit],
-        )
-        for r in await cur.fetchall():
-            items.append({
-                "kind": "fragment",
-                "id": r["id"],
-                "content": r["content"],
-                "scope": r["scope"],
-                "layer": r["layer"],
-                "importance": r["importance"],
-                "updated_at": r["updated_at"],
-            })
+        if kind in (None, "fragment"):
+            for r in await _fetch_fragments(conn, layer, scope, q, limit):
+                items.append({
+                    "kind": "fragment",
+                    "id": r["id"],
+                    "content": r["content"],
+                    "scope": r["scope"],
+                    "layer": r["layer"],
+                    "importance": r["importance"],
+                    "updated_at": r["updated_at"],
+                })
 
-        if layer in (None, "L2"):  # triples 属于 L2 语义层
+        if kind in (None, "triple") and layer in (None, "L2"):  # triples 属于 L2 语义层
             t_where, t_params = "1=1", []
             if scope:
                 t_where += " AND t.scope = ?"
@@ -143,7 +208,7 @@ def create_api_router(service: MemoryService) -> APIRouter:
                     "updated_at": r["valid_from"],
                 })
 
-        if q or layer in (None, "L1"):
+        if kind in (None, "entity") and (q or layer in (None, "L1")):
             e_where, e_params = "1=1", []
             if scope:
                 e_where += " AND scope = ?"
@@ -167,7 +232,8 @@ def create_api_router(service: MemoryService) -> APIRouter:
                     "updated_at": r["valid_from"],
                 })
 
-        items.sort(key=lambda x: x["updated_at"] or "", reverse=True)
+        if not q:  # 搜索模式保持相关度顺序;浏览模式按时间倒序
+            items.sort(key=lambda x: x["updated_at"] or "", reverse=True)
         return items[:limit]
 
     @router.get("/memory/{memory_id}")
@@ -184,7 +250,12 @@ def create_api_router(service: MemoryService) -> APIRouter:
             )
             row = await cur.fetchone()
             if row is not None:
-                return {"table": table, "row": dict(row)}
+                # BLOB(如 embedding)不可 JSON 序列化,替换为占位标记
+                clean = {
+                    k: (f"<binary {len(v)} bytes>" if isinstance(v, bytes) else v)
+                    for k, v in dict(row).items()
+                }
+                return {"table": table, "row": clean}
         return {"error": f"未找到记忆: {memory_id}"}
 
     @router.post("/recall-test")
