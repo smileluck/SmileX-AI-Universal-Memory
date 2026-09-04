@@ -6,6 +6,17 @@
 
 ## [Unreleased]
 
+### Added
+
+- **初始化扫描新增源码通道**: `memory_init_project` / `init --scan` /
+  `bootstrap_project(scan_code=True)` 扫描项目源码结构生成初始记忆——
+  `.py` 用 AST 提取模块 docstring、顶层类与函数、内外部依赖
+  (标准库过滤,绝对导入按本目录/src 布局/仓库根顺序解析为仓库内
+  相对路径),其余代码扩展名
+  (.ts/.go/.rs 等)读文件头注释兜底;文件/类/外部库分别落
+  `file:`/`class:`/`tech:` 实体(与 git 通道同命名约定,跨通道去重),
+  复用 markdown 的目录忽略规则与 `max_files` 上限,幂等可重跑
+
 ## [0.1.2] - 2026-09-04
 
 ### Added

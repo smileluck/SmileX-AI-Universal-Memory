@@ -5,7 +5,7 @@
 - mcp:     stdio MCP 模式(项目独立库场景)
 - init:    一键注入 MCP 配置到 Agent 工具(Kimi/Claude/Codex/Cursor/ZCode/Trae,
            WorkBuddy 输出手动接入指引);支持 --scope project|user;
-           --scan 时冷启动并扫描项目(README/git 历史/markdown)生成初始记忆
+           --scan 时冷启动并扫描项目(README/git 历史/markdown/源码结构)生成初始记忆
 - doctor:  环境自检(配置 / db / 端口 / 服务可达性)
 
 安装: pip install 'smilex-ai-memory[server]'
@@ -38,7 +38,8 @@ _GUIDE_TEXT = f"""
 - **回答涉及项目事实、历史决策、个人偏好的问题前**,先调 `memory_recall(query)` 获取上下文
 - **任务完成或得到新结论后**,调 `memory_write(content, entities?, relations?)` 沉淀
 - 首次接触本项目时调 `memory_init_project(name, project_path="<项目根>")` 完成冷启动:
-  自动读 README + 导入 git 历史/markdown 文档为初始记忆(幂等;stdio 模式可省略 project_path)
+  自动读 README + 导入 git 历史/markdown 文档/源码结构为初始记忆
+  (幂等;stdio 模式可省略 project_path)
 - 同一对话内保持相同 session_id(默认 "default")
 """.strip()
 
@@ -357,7 +358,7 @@ def _cmd_mcp(args: argparse.Namespace) -> int:
 
 
 def _run_scan(project_dir: Path, *, stdio: bool) -> int:
-    """冷启动 + 扫描导入(README/git 历史/markdown → 初始记忆).
+    """冷启动 + 扫描导入(README/git 历史/markdown/源码 → 初始记忆).
 
     db 选择与注入的 MCP 条目一致: stdio 模式写项目内 ``<dir>/.smilex/memory.db``,
     HTTP 模式直接写全局库(跨进程写入,建议服务空闲时执行)。
@@ -551,7 +552,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_init.add_argument(
         "--scan", action="store_true",
-        help="冷启动并扫描项目(README/git 历史/markdown)生成初始记忆",
+        help="冷启动并扫描项目(README/git 历史/markdown/源码结构)生成初始记忆",
     )
     p_init.set_defaults(func=_cmd_init)
 

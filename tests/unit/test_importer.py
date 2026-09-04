@@ -184,6 +184,130 @@ async def test_import_markdown_max_files(engine, project, tmp_path):
     assert "max_files" in result.errors[0]
 
 
+# ---------- 源码文件导入 ----------
+
+
+async def test_import_code_python_ast(engine, project, tmp_path):
+    """.py AST 提取: docstring/顶层定义/依赖 → L1 记忆 + 文件/类/依赖种子,幂等."""
+    bootstrap, scope = project
+    app = tmp_path / "app"
+    app.mkdir()
+    (app / "__init__.py").write_text("", encoding="utf-8")
+    (app / "utils.py").write_text("def f():\n    pass\n", encoding="utf-8")
+    (app / "helpers.py").write_text("def g():\n    pass\n", encoding="utf-8")
+    (app / "core.py").write_text(
+        '"""核心模块."""\n'
+        "import os\n"
+        "import sys\n"
+        "import fastapi\n"
+        "from app.utils import f\n"
+        "from .helpers import g\n\n"
+        "class Service:\n    pass\n\n\ndef run():\n    pass\n",
+        encoding="utf-8",
+    )
+
+    importer = BulkImporter(bootstrap)
+    result = await importer.import_source(
+        scope, ImportSource(kind=ImportKind.CODE, subject="demo", path=str(tmp_path))
+    )
+    assert result.errors == []
+    assert result.source_count == 4  # 含空 __init__.py
+    assert result.memory_count == 4
+
+    fragments = await _fragments(engine, scope)
+    core = next(f for f in fragments if f["fragment_id"] == "code:app/core.py")
+    assert "核心模块" in core["content"]
+    assert "Service" in core["content"] and "run" in core["content"]
+    # 标准库(os/sys)过滤;fastapi 外部依赖;app.utils / .helpers 解析为仓库内路径
+    assert "fastapi" in core["content"]
+    assert "app/utils.py" in core["content"] and "app/helpers.py" in core["content"]
+    assert "os" not in core["content"].replace("fastapi", "")
+
+    entity_ids = await _entity_ids(engine, scope)
+    # 文件实体 entity_id 与 git 通道同键(跨通道去重)
+    assert "file:app-core-py" in entity_ids
+    assert "tech:fastapi" in entity_ids
+    assert "class:app-core-py-service" in entity_ids
+
+    # 幂等: 重复导入不增数据
+    again = await importer.import_source(
+        scope, ImportSource(kind=ImportKind.CODE, subject="demo", path=str(tmp_path))
+    )
+    assert again.memory_count == 0
+    assert again.skipped_count == 4
+    assert (again.entity_count, again.triple_count) == (
+        result.entity_count,
+        result.triple_count,
+    )
+
+
+async def test_import_code_dep_resolution_src_layout_and_sibling(
+    engine, project, tmp_path
+):
+    """绝对 import 解析: src 布局与同目录平级模块归内部,不误报 tech 实体."""
+    bootstrap, scope = project
+    pkg = tmp_path / "src" / "mypkg"
+    pkg.mkdir(parents=True)
+    (pkg / "__init__.py").write_text("", encoding="utf-8")
+    (pkg / "models.py").write_text("y = 2\n", encoding="utf-8")
+    (pkg / "api.py").write_text(
+        "import mypkg.models\n", encoding="utf-8"
+    )
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    (scripts / "common.py").write_text("x = 1\n", encoding="utf-8")
+    (scripts / "run.py").write_text("import common\n", encoding="utf-8")
+
+    importer = BulkImporter(bootstrap)
+    result = await importer.import_source(
+        scope, ImportSource(kind=ImportKind.CODE, subject="demo", path=str(tmp_path))
+    )
+    assert result.errors == []
+    fragments = {
+        f["fragment_id"]: f["content"] for f in await _fragments(engine, scope)
+    }
+    # src 布局: import mypkg.models 解析为 src/mypkg/models 路径而非外部库
+    assert "src/mypkg/models.py" in fragments["code:src/mypkg/api.py"]
+    # 平级脚本: import common 解析为同目录文件而非外部库
+    assert "scripts/common.py" in fragments["code:scripts/run.py"]
+    entity_ids = await _entity_ids(engine, scope)
+    assert "tech:mypkg" not in entity_ids
+    assert "tech:common" not in entity_ids
+
+
+async def test_import_code_other_extensions_header_comment(engine, project, tmp_path):
+    """非 .py 源码: 文件头注释兜底成片段;忽略目录与 max_files 同 markdown."""
+    bootstrap, scope = project
+    (tmp_path / "index.js").write_text(
+        "// 页面入口\n// 处理路由与渲染\nimport x from 'y'\n", encoding="utf-8"
+    )
+    vendored = tmp_path / "node_modules" / "lib"
+    vendored.mkdir(parents=True)
+    (vendored / "dep.js").write_text("// ignored\n", encoding="utf-8")
+
+    importer = BulkImporter(bootstrap)
+    result = await importer.import_source(
+        scope, ImportSource(kind=ImportKind.CODE, subject="demo", path=str(tmp_path))
+    )
+    assert result.errors == []
+    assert result.source_count == 1
+    fragments = await _fragments(engine, scope)
+    js = next(f for f in fragments if f["fragment_id"] == "code:index.js")
+    assert "页面入口" in js["content"] and "处理路由与渲染" in js["content"]
+
+
+async def test_import_code_missing_path(project, tmp_path):
+    bootstrap, scope = project
+    importer = BulkImporter(bootstrap)
+    with pytest.raises(RuntimeError, match="不存在"):
+        await importer.import_source(
+            scope,
+            ImportSource(
+                kind=ImportKind.CODE, subject="demo", path=str(tmp_path / "nope")
+            ),
+        )
+
+
 # ---------- 文本批次导入 ----------
 
 

@@ -103,12 +103,13 @@ def test_guide_claude_writes_both_files(tmp_path):
 # ---------- init --scan(冷启动 + 扫描导入) ----------
 
 
-def _md_fragments(db_path) -> int:
+def _fragments_like(db_path, prefix: str) -> int:
     con = sqlite3.connect(db_path)
     try:
         return int(
             con.execute(
-                "SELECT COUNT(*) FROM temporal_fragments WHERE fragment_id LIKE 'md:%'"
+                "SELECT COUNT(*) FROM temporal_fragments WHERE fragment_id LIKE ?",
+                [f"{prefix}%"],
             ).fetchone()[0]
         )
     finally:
@@ -124,6 +125,9 @@ def test_run_scan_stdio_creates_project_db(tmp_path, monkeypatch):
     docs = tmp_path / "docs"
     docs.mkdir()
     (docs / "a.md").write_text("# A\nUses Redis.\n", encoding="utf-8")
+    (tmp_path / "app.py").write_text(
+        '"""应用."""\nimport fastapi\n\n\nclass App:\n    pass\n', encoding="utf-8"
+    )
     # 隔离真实 ~/.smilex/config.toml(避免读到本机 embedder 配置)
     monkeypatch.setattr(
         "smilex.cli.load_config",
@@ -133,10 +137,12 @@ def test_run_scan_stdio_creates_project_db(tmp_path, monkeypatch):
     assert _run_scan(tmp_path, stdio=True) == 0
     db = tmp_path / ".smilex" / "memory.db"
     assert db.exists()
-    assert _md_fragments(db) == 2  # README.md + docs/a.md
+    assert _fragments_like(db, "md:") == 2  # README.md + docs/a.md
+    assert _fragments_like(db, "code:") == 1  # app.py
 
     _run_scan(tmp_path, stdio=True)  # 重复执行: 幂等不翻倍
-    assert _md_fragments(db) == 2
+    assert _fragments_like(db, "md:") == 2
+    assert _fragments_like(db, "code:") == 1
 
 
 # ---------- 多工具适配器(codex / cursor / zcode / trae / workbuddy) ----------

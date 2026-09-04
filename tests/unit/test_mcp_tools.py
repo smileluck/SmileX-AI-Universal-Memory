@@ -97,12 +97,15 @@ async def test_bad_scope_rejected(service):
 
 
 async def test_init_project_scan_with_path(service, tmp_path):
-    """project_path → 服务端扫描: README 自动读取 + markdown 导入 + skipped 明细."""
+    """project_path → 服务端扫描: README 自动读取 + markdown/源码导入 + skipped 明细."""
     server = create_mcp_server(service)
     (tmp_path / "README.md").write_text("# Demo\nBuilt with FastAPI.\n", encoding="utf-8")
     docs = tmp_path / "docs"
     docs.mkdir()
     (docs / "a.md").write_text("# A\nUses Redis.\n", encoding="utf-8")
+    (tmp_path / "main.py").write_text(
+        '"""入口."""\nimport sqlite3\n\n\ndef main():\n    pass\n', encoding="utf-8"
+    )
 
     resp = await _call(
         server, "memory_init_project",
@@ -111,6 +114,7 @@ async def test_init_project_scan_with_path(service, tmp_path):
     assert resp["project_path"] == str(tmp_path)
     assert resp["init"]["scope"].startswith("project:")
     assert resp["imports"]["markdown"]["memory_count"] == 2
+    assert resp["imports"]["code"]["memory_count"] == 1
     assert any("无 .git" in s for s in resp["skipped"])
 
 

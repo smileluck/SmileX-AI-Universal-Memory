@@ -1,6 +1,6 @@
 """批量导入(§9.5.1 机制 4 / §9.5.2 步骤 3 / 04-layer3 §2.5)— Git/Markdown/文本批次.
 
-三类数据源统一为 ImportSource,产出 ImportResult:
+四类数据源统一为 ImportSource,产出 ImportResult:
 - markdown: 文件/目录批量,复用 readme_parser 规则提取(大文件按行分块),
   每个文件额外写一条 L1 时序记忆(fragment_id="md:{相对路径}" 幂等);
   目录扫描跳过依赖/构建/隐藏目录(EXCLUDED_DIRS),受 max_files 截断
@@ -10,6 +10,12 @@
   contains_file 三元组;分批写入 + CheckpointStore 断点续传(cursor=最后处理的提交)
 - text: 文本批次,RuleBasedExtractor 规则提取 + 每条文本一条 L1 时序记忆
   (fragment_id="text:{sha256[:16]}" 幂等)
+- code: 源码文件批量(fragment_id="code:{相对路径}" 幂等,mtime 锚定),
+  .py 走 AST 提取(模块 docstring/顶层类与函数/依赖),其余扩展名取文件头
+  注释兜底;文件 → object 实体(entity_id 与 git 通道同键,跨通道去重)+
+  contains_file 三元组,顶层类 → concept 实体 + defines_class 三元组,
+  依赖 → depends_on 三元组(仓库内解析为文件路径,外部库取首段挂 tech 实体,
+  标准库过滤);目录扫描忽略规则与 max_files 同 markdown
 
 幂等性: 实体/三元组走 ProjectBootstrap.apply_seeds(按 entity_id/全键去重),
 时序记忆按 (scope, fragment_id) 去重;重复导入不增数据.
@@ -20,10 +26,12 @@ git 不可用(shutil.which("git") is None)/路径非法时抛 RuntimeError;
 
 from __future__ import annotations
 
+import ast
 import asyncio
 import hashlib
 import json
 import shutil
+import sys
 import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -43,11 +51,21 @@ _MAX_COMMIT_FILES_IN_CONTENT = 20
 # Markdown 时序记忆内容截断长度
 _MAX_FRAGMENT_CHARS = 4000
 
-# markdown 目录扫描跳过的目录段(依赖/构建产物/工具缓存;隐藏目录一律跳过)
+# markdown/code 目录扫描跳过的目录段(依赖/构建产物/工具缓存;隐藏目录一律跳过)
 EXCLUDED_DIRS = frozenset({
     ".git", ".smilex", "node_modules", ".venv", "venv", ".build", "dist",
     "build", "site-packages", "__pycache__", ".idea", ".vscode",
 })
+
+# code 导入扫描的源码扩展名(.py 走 AST 全量提取,其余走文件头注释兜底)
+CODE_EXTENSIONS = frozenset({
+    ".py", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".go", ".rs", ".java",
+    ".kt", ".swift", ".c", ".h", ".cpp", ".hpp", ".cc", ".rb", ".php", ".sh",
+})
+# 单文件顶层定义列出的上限(超出折叠为 "…等 N 个")
+_MAX_DEFS_LISTED = 30
+# 模块 docstring / 文件头注释截断长度
+_MAX_HEADER_CHARS = 800
 
 
 def _in_excluded_dir(rel: Path) -> bool:
@@ -55,12 +73,172 @@ def _in_excluded_dir(rel: Path) -> bool:
     return any(p in EXCLUDED_DIRS or p.startswith(".") for p in rel.parts[:-1])
 
 
+# ==================== 源码文件提取(纯函数,便于单测) ====================
+
+
+@dataclass
+class _PySummary:
+    """单个 .py 的 AST 提取结果."""
+
+    docstring: str = ""
+    classes: list[str] = field(default_factory=list)
+    functions: list[str] = field(default_factory=list)
+    internal_deps: list[str] = field(default_factory=list)  # 仓库内相对路径
+    external_deps: list[str] = field(default_factory=list)  # 外部库首段名
+
+
+def _header_comment(text: str) -> str:
+    """非 .py 源码的文件头注释提取(//、#、块注释三种风格,取首个连续块)."""
+    lines = text.splitlines()
+    start = 1 if lines and lines[0].startswith("#!") else 0
+    block: list[str] = []
+    in_block_comment = False
+    for line in lines[start:]:
+        stripped = line.strip()
+        if not block and not in_block_comment:
+            if not stripped:
+                continue  # 跳过文件头空行
+            if stripped.startswith(("//", "#")):
+                block.append(stripped.lstrip("/# ").rstrip())
+            elif stripped.startswith("/*"):
+                body = stripped[2:].split("*/", 1)[0].strip()
+                block.append(body)
+                in_block_comment = "*/" not in stripped
+            else:
+                break  # 首个非注释行 → 结束
+        elif in_block_comment:
+            block.append(stripped.split("*/", 1)[0].strip())
+            if "*/" in line:
+                break
+        elif stripped.startswith(("//", "#")):
+            block.append(stripped.lstrip("/# ").rstrip())
+        else:
+            break
+    return "\n".join(b for b in block if b)
+
+
+def _module_to_rel(base: Path, module: str) -> str | None:
+    """点分模块名 → base 下的相对路径(模块文件或包 __init__);未命中返回 None."""
+    if not module:
+        return None
+    rel = Path(*module.split("."))
+    for candidate in (rel.with_suffix(".py"), rel / "__init__.py"):
+        if (base / candidate).is_file():
+            return candidate.as_posix()
+    return None
+
+
+def _resolve_internal(
+    root: Path, pkg_parts: tuple[str, ...], module: str
+) -> str | None:
+    """绝对 import → 仓库内相对路径;依次尝试本目录(平级脚本)/src 布局/仓库根."""
+    for base, prefix in (
+        (root.joinpath(*pkg_parts), pkg_parts),
+        (root / "src", ("src",)),
+        (root, ()),
+    ):
+        rel = _module_to_rel(base, module)
+        if rel is not None:
+            return "/".join((*prefix, rel))
+    return None
+
+
+def _add_dep(
+    summary: _PySummary, root: Path, pkg_parts: tuple[str, ...],
+    level: int, module: str,
+) -> None:
+    """一条 import → 内部路径或外部库首段(标准库过滤)."""
+    if level == 0:
+        internal = _resolve_internal(root, pkg_parts, module)
+        if internal is not None:
+            summary.internal_deps.append(internal)
+        elif module.split(".")[0] not in sys.stdlib_module_names:
+            summary.external_deps.append(module.split(".")[0])
+        return
+    # 相对导入: level=1 → 当前包,level=2 → 上一级 …(越界/空 module 放弃解析)
+    if not module or level - 1 > len(pkg_parts):
+        return
+    base_parts = pkg_parts[: len(pkg_parts) - (level - 1)]
+    internal = _module_to_rel(root.joinpath(*base_parts), module)
+    if internal is not None:
+        summary.internal_deps.append("/".join([*base_parts, internal]))
+
+
+def _summarize_py(rel: str, text: str, root: Path) -> _PySummary:
+    """AST 提取单个 .py: docstring / 顶层类与函数 / 依赖;语法错误降级文件头注释."""
+    summary = _PySummary()
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        summary.docstring = _header_comment(text)
+        return summary
+    summary.docstring = (ast.get_docstring(tree) or "").strip()
+    pkg_parts = Path(rel).parts[:-1]
+    for node in tree.body:
+        if isinstance(node, ast.ClassDef):
+            summary.classes.append(node.name)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            summary.functions.append(node.name)
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                _add_dep(summary, root, pkg_parts, 0, alias.name)
+        elif isinstance(node, ast.ImportFrom):
+            module = node.module or (node.names[0].name if node.names else "")
+            _add_dep(summary, root, pkg_parts, node.level, module)
+    return summary
+
+
+def _merge_py_seeds(
+    seeds: ExtractionResult, subject: str, rel: str, summary: _PySummary
+) -> None:
+    """单个 .py 的结构 → 种子(文件实体与 git 通道同键,跨通道去重)."""
+    stem = Path(rel).stem
+    # 文件实体 + contains_file(entity_id 约定与 git 导入一致)
+    seeds.entities.append(
+        EntitySeed(name=rel, entity_type="object", entity_id=f"file:{normalize_name(rel)}")
+    )
+    seeds.triples.append(
+        TripleSeed(subject=subject, predicate="contains_file", object_name=rel)
+    )
+    for cls in summary.classes:
+        qualified = f"{stem}.{cls}"  # 带模块前缀,避免跨文件同名类解析歧义
+        seeds.entities.append(
+            EntitySeed(
+                name=qualified,
+                entity_type="concept",
+                entity_id=f"class:{normalize_name(rel)}-{normalize_name(cls)}",
+            )
+        )
+        seeds.triples.append(
+            TripleSeed(subject=rel, predicate="defines_class", object_name=qualified)
+        )
+    for dep in summary.internal_deps:
+        seeds.entities.append(
+            EntitySeed(
+                name=dep, entity_type="object", entity_id=f"file:{normalize_name(dep)}"
+            )
+        )
+        seeds.triples.append(
+            TripleSeed(subject=rel, predicate="depends_on", object_name=dep)
+        )
+    for lib in sorted(set(summary.external_deps)):
+        seeds.entities.append(
+            EntitySeed(
+                name=lib, entity_type="concept", entity_id=f"tech:{normalize_name(lib)}"
+            )
+        )
+        seeds.triples.append(
+            TripleSeed(subject=rel, predicate="depends_on", object_name=lib)
+        )
+
+
 class ImportKind(StrEnum):
-    """导入数据源类型(04-layer3 §2.5,MVP 实现前三种)."""
+    """导入数据源类型(04-layer3 §2.5)."""
 
     GIT = "git"
     MARKDOWN = "markdown"
     TEXT = "text"
+    CODE = "code"
 
 
 @dataclass
@@ -70,12 +248,13 @@ class ImportSource:
     Attributes:
         kind: 数据源类型
         subject: 导入挂载的主体实体名(通常是项目名;三元组的 subject)
-        path: git 仓库路径 / markdown 文件或目录路径(kind=text 时不用)
+        path: git 仓库路径 / markdown、code 的扫描根目录或文件路径
+              (kind=text 时不用)
         texts: 文本批次(仅 kind=text)
         max_commits: git 导入的提交数上限(None = 全部)
         since: git log --since 过滤(如 "2026-01-01")
         resume: 存在同名断点时是否续传(仅 git 分批生效)
-        max_files: markdown 目录扫描的文件数上限(超出截断并记入 errors)
+        max_files: markdown/code 目录扫描的文件数上限(超出截断并记入 errors)
     """
 
     kind: ImportKind
@@ -90,7 +269,10 @@ class ImportSource:
     def __post_init__(self) -> None:
         if not self.subject:
             raise ValueError("ImportSource.subject 不能为空")
-        if self.kind in (ImportKind.GIT, ImportKind.MARKDOWN) and not self.path:
+        if (
+            self.kind in (ImportKind.GIT, ImportKind.MARKDOWN, ImportKind.CODE)
+            and not self.path
+        ):
             raise ValueError(f"ImportSource(kind={self.kind}) 需要 path")
         if self.kind is ImportKind.TEXT and not self.texts:
             raise ValueError("ImportSource(kind=text) 需要 texts")
@@ -170,6 +352,8 @@ class BulkImporter:
             result = await self._import_markdown(scope, source)
         elif source.kind is ImportKind.TEXT:
             result = await self._import_text(scope, source)
+        elif source.kind is ImportKind.CODE:
+            result = await self._import_code(scope, source)
         else:
             result = await self._import_git(scope, source)
         result.elapsed_ms = int((time.monotonic() - start) * 1000)
@@ -211,6 +395,81 @@ class BulkImporter:
                     scope,
                     fragment_id=f"md:{rel}",
                     content=f"[{rel}]\n{content[:_MAX_FRAGMENT_CHARS]}",
+                    time_start=datetime.fromtimestamp(path.stat().st_mtime, UTC),
+                )
+                if written:
+                    result.memory_count += 1
+                else:
+                    result.skipped_count += 1
+                result.source_count += 1
+            except Exception as exc:  # 单文件失败不中断整体导入
+                result.errors.append(f"{rel}: {exc}")
+        # H6: 循环内不逐条 commit,此处统一提交
+        await self._bootstrap._storage.conn.commit()
+        result.entity_count, result.triple_count = await self._bootstrap.apply_seeds(
+            scope, seeds
+        )
+        return result
+
+    # ==================== 源码文件 ====================
+
+    async def _import_code(self, scope: str, source: ImportSource) -> ImportResult:
+        """源码文件批量导入: .py AST 提取(结构/依赖),其余扩展名文件头注释兜底.
+
+        每文件一条 L1 时序记忆(fragment_id="code:{相对路径}" 幂等,mtime 锚定);
+        种子(文件/类/依赖实体与三元组)循环内累积,结束后统一 apply_seeds。
+        """
+        assert source.path is not None
+        root = Path(source.path)
+        if not root.is_dir():
+            raise RuntimeError(f"code 扫描路径不存在: {root}")
+        files = sorted(
+            f for f in root.rglob("*")
+            if f.is_file() and f.suffix.lower() in CODE_EXTENSIONS
+            and not _in_excluded_dir(f.relative_to(root))
+        )
+
+        result = ImportResult(kind=source.kind, scope=scope)
+        if len(files) > source.max_files:
+            result.errors.append(
+                f"源码文件数 {len(files)} 超过 max_files={source.max_files},"
+                f"仅导入前 {source.max_files} 个(可缩小 path 范围或调大 max_files)"
+            )
+            files = files[:source.max_files]
+
+        seeds = ExtractionResult()
+        for path in files:
+            rel = path.relative_to(root).as_posix()
+            try:
+                text = path.read_text(encoding="utf-8")
+                if path.suffix == ".py":
+                    summary = _summarize_py(rel, text, root)
+                    _merge_py_seeds(seeds, source.subject, rel, summary)
+                    header = summary.docstring
+                    defs = [*summary.classes, *summary.functions]
+                    internal_deps = summary.internal_deps
+                    external_deps = summary.external_deps
+                else:
+                    header = _header_comment(text)
+                    defs, internal_deps, external_deps = [], [], []
+
+                n_lines = len(text.splitlines())
+                parts = [f"[{rel}] ({n_lines} 行)"]
+                if header:
+                    parts.append(header[:_MAX_HEADER_CHARS])
+                if defs:
+                    listed = ", ".join(defs[:_MAX_DEFS_LISTED])
+                    if len(defs) > _MAX_DEFS_LISTED:
+                        listed += f" …等 {len(defs)} 个"
+                    parts.append(f"定义: {listed}")
+                if internal_deps:
+                    parts.append("内部依赖: " + ", ".join(sorted(set(internal_deps))))
+                if external_deps:
+                    parts.append("外部依赖: " + ", ".join(sorted(set(external_deps))))
+                written = await self._write_fragment(
+                    scope,
+                    fragment_id=f"code:{rel}",
+                    content="\n".join(parts)[:_MAX_FRAGMENT_CHARS],
                     time_start=datetime.fromtimestamp(path.stat().st_mtime, UTC),
                 )
                 if written:

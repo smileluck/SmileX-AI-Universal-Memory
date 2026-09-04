@@ -8,7 +8,7 @@
 - memory_recall: 检索记忆上下文(回答涉及项目事实/历史决策前先调)
 - memory_write: 沉淀新事实/结论(任务完成、得到新决策时调)
 - memory_init_project: 新项目冷启动 + 扫描生成初始记忆(README/git 历史/
-  markdown 文档;project_path 缺省时 stdio 模式按 db 路径推断项目根)
+  markdown 文档/源码结构;project_path 缺省时 stdio 模式按 db 路径推断项目根)
 - memory_stats: 各层记忆计数(调试/面板)
 
 session_id: 同一对话会话内保持一致可获得 L0 工作记忆加速;缺省 "default"。
@@ -195,7 +195,8 @@ def create_mcp_server(service: MemoryService) -> MCPServer:
 
     @server.tool(
         description="新项目冷启动 + 扫描生成初始记忆: 传入 project_path 自动读 README、"
-        "导入 git 历史/markdown 文档为 L1 记忆并建立 project scope(幂等可重跑)。"
+        "导入 git 历史/markdown 文档/源码结构(.py AST 提取模块文档、顶层定义与依赖)"
+        "为 L1 记忆并建立 project scope(幂等可重跑)。"
         "首次在某项目使用记忆服务时调用一次;stdio 模式 project_path 可省略。"
     )
     async def memory_init_project(
@@ -206,6 +207,7 @@ def create_mcp_server(service: MemoryService) -> MCPServer:
         project_path: str | None = None,
         scan_git: bool = True,
         scan_markdown: bool = True,
+        scan_code: bool = True,
         max_commits: int | None = None,
     ) -> str:
         """冷启动 + 扫描导入,返回 scope、种子统计与各源导入结果(JSON).
@@ -226,6 +228,7 @@ def create_mcp_server(service: MemoryService) -> MCPServer:
             readme_content=readme_content,
             scan_git=scan_git,
             scan_markdown=scan_markdown,
+            scan_code=scan_code,
             max_commits=max_commits,
         )
         return json.dumps(result, ensure_ascii=False)

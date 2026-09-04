@@ -264,19 +264,20 @@ class MemoryMiddleware:
         readme_content: str | None = None,
         scan_git: bool = True,
         scan_markdown: bool = True,
+        scan_code: bool = True,
         max_commits: int | None = None,
     ) -> dict:
         """项目初始化 = 冷启动 + 扫描生成初始记忆(MCP/CLI 共用编排).
 
         initialize_project 建立项目 scope(同名复用)后,对 project_path
-        依次导入 git 历史 / markdown 文档(README 缺省时自动从项目根读取);
-        单源失败(如目录无 .git、git 不可用)记入 skipped 继续执行.
+        依次导入 git 历史 / markdown 文档 / 源码文件(README 缺省时自动从
+        项目根读取);单源失败(如目录无 .git、git 不可用)记入 skipped 继续执行.
 
         Args:
             name: 项目名(scope 复用与种子挂载的主体)
             project_path: 项目根目录;None 时只做冷启动不扫描
             readme_content: README 文本;None 且有 project_path 时自动读取
-            scan_git / scan_markdown: 是否导入对应数据源
+            scan_git / scan_markdown / scan_code: 是否导入对应数据源
             max_commits: git 导入提交数上限(None = 全部)
 
         Returns:
@@ -309,7 +310,7 @@ class MemoryMiddleware:
         imports: dict[str, dict] = {}
         skipped: list[str] = []
         if root is None:
-            if scan_git or scan_markdown:
+            if scan_git or scan_markdown or scan_code:
                 skipped.append("扫描跳过: 未提供 project_path")
         else:
             sources: list[tuple[str, ImportSource]] = []
@@ -332,6 +333,11 @@ class MemoryMiddleware:
                     ImportSource(
                         kind=ImportKind.MARKDOWN, subject=name, path=str(root)
                     ),
+                ))
+            if scan_code:
+                sources.append((
+                    "code",
+                    ImportSource(kind=ImportKind.CODE, subject=name, path=str(root)),
                 ))
             for kind_label, source in sources:
                 try:

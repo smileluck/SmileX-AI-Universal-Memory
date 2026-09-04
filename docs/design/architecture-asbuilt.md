@@ -110,7 +110,7 @@ MemoryMiddleware(
 | `write(WriteRequest, *, session_id, scope_id=None, chain_id=None, detect_conflicts=True)` | 见 §4;返回 `WriteResponse(status, memory_ids, layers_affected, conflicts)` |
 | `recall(RecallRequest, *, session_id=None, include_archived=False)`                       | 见 §5;返回 `RecallResponse(context_text, sources, layers_used, truncated)` |
 | `initialize_project / import_source / inject_seeds / clone_project`                       | 项目冷启动 / Git-Markdown-文本导入 / 种子注入 / 跨项目克隆                                |
-| `bootstrap_project(name, *, project_path, ...)`                                            | 冷启动+扫描编排(MCP/CLI 共用):README 自动读取 + git/markdown 导入;同名项目 scope 复用,幂等可重跑 |
+| `bootstrap_project(name, *, project_path, ...)`                                            | 冷启动+扫描编排(MCP/CLI 共用):README 自动读取 + git/markdown/源码导入;同名项目 scope 复用,幂等可重跑 |
 | `archive_expired(policy, scope)` / `restore_archived(...)`                                | 归档与恢复                                                                   |
 | `close_session(session_id, persist=True)` / `restore_session(...)`                        | L0 快照落盘(007/009 表)/ 恢复                                                  |
 
@@ -291,9 +291,12 @@ PRIORITY\_INHERITANCE;`resume` 从断点续跑。
 `onboarding`,同名项目按 entity_id 复用既有 scope)、README 解析
 (`readme_parser`)、项目模板(`templates/{agent,cli,data,web}.yaml`)、
 种子注入(`seeds/seed_injector`)、批量导入(`bulk_importer`,Git/Markdown/
-文本;markdown 目录扫描跳过 node_modules/.venv 等依赖与构建目录,
-`max_files` 截断)、跨项目克隆(`cross_project_cloner`)、
-主动学习(`active_learner`)。MCP `memory_init_project(project_path=...)`
+源码/文本;markdown 与源码目录扫描跳过 node_modules/.venv 等依赖与构建
+目录,`max_files` 截断;源码通道 `.py` 走 AST——模块 docstring/顶层
+类与函数/内外部依赖(标准库过滤,绝对导入按本目录/src 布局/仓库根
+顺序解析),其余扩展名读文件头注释兜底,
+文件/类/外部库分别落 `file:`/`class:`/`tech:` 实体)、跨项目克隆
+(`cross_project_cloner`)、主动学习(`active_learner`)。MCP `memory_init_project(project_path=...)`
 与 CLI `smilex-memory init --scan` 经 `MemoryMiddleware.bootstrap_project`
 复用同一编排。
 
@@ -337,16 +340,17 @@ token_budget=4000 / enable_scheduler=true`,CLI 可覆盖 db/host/port):
   session_id, project, top_k, token_budget)` / `memory_write(content,
   session_id, scope, scope_id, entities, relations, importance)` /
   `memory_init_project(name, project_path, scan_git, scan_markdown,
-  max_commits, ...)`(冷启动+扫描生成初始记忆;stdio 模式 project_path
-  缺省时按 db 路径 `<项目根>/.smilex/memory.db` 推断,HTTP 模式需显式
-  传参)/ `memory_stats`;Reranker/Extractor 按 config 工厂构造注入
+  scan_code, max_commits, ...)`(冷启动+扫描生成初始记忆;stdio 模式
+  project_path 缺省时按 db 路径 `<项目根>/.smilex/memory.db` 推断,
+  HTTP 模式需显式传参)/ `memory_stats`;Reranker/Extractor 按 config
+  工厂构造注入
 - **REST**(`api.py`):`GET /stats` `/memories` `/memory/{id}`
   `/tasks` + `POST /recall-test`
 - **Web 面板**:只读静态页(概览统计/记忆浏览/召回测试),写入统一走 MCP
 - **CLI**(`cli.py` → `smilex-memory`):`serve` / `mcp` / `init`
   (向 Kimi Code / Claude Code 注入工具配置 + 记忆使用约定;`--scan`
-  时经 `bootstrap_project` 冷启动并扫描 README/git/markdown 生成初始
-  记忆,stdio 模式写项目内库、HTTP 模式直写全局库) / `doctor`;
+  时经 `bootstrap_project` 冷启动并扫描 README/git/markdown/源码生成
+  初始记忆,stdio 模式写项目内库、HTTP 模式直写全局库) / `doctor`;
   三平台自启动注册脚本在 `scripts/register-service-*`
 
 ## 12. 降级矩阵
@@ -488,8 +492,9 @@ token_budget=4000 / enable_scheduler=true`,CLI 可覆盖 db/host/port):
 | forget / 半衰期 | 核心任务:留存分 = importance × 0.5^(age/30 天),低于 0.1 删除或降权 |
 | summarize | 核心任务:规则式(非 LLM)摘要压缩 |
 | semantic | 核心任务:NetworkX 构实体图、预计算连通分量("语义社区")缓存 |
-| bootstrap / 冷启动 | 新项目初始化包:向导问答 + README 解析 + 模板 + 种子注入 + 批量导入;MCP `memory_init_project(project_path=...)` 与 CLI `init --scan` 一键完成"扫描并生成初始记忆",同名项目复用 scope 幂等可重跑 |
-| 扫描忽略规则 | markdown 目录扫描跳过 node_modules/.venv/dist 等依赖与构建目录及隐藏目录,`max_files`(默认 500)截断防超大仓库 |
+| bootstrap / 冷启动 | 新项目初始化包:向导问答 + README 解析 + 模板 + 种子注入 + 批量导入;MCP `memory_init_project(project_path=...)` 与 CLI `init --scan` 一键完成"扫描并生成初始记忆"(README/git/markdown/源码),同名项目复用 scope 幂等可重跑 |
+| 扫描忽略规则 | markdown 与源码目录扫描跳过 node_modules/.venv/dist 等依赖与构建目录及隐藏目录,`max_files`(默认 500)截断防超大仓库 |
+| 源码导入 | 扫描通道之一:`.py` 用 AST 提取模块 docstring/顶层类与函数/内外部依赖(标准库过滤),其余代码扩展名读文件头注释兜底;文件/类/外部库分别落 `file:`/`class:`/`tech:` 实体,内部依赖解析为仓库相对路径 |
 | 种子注入(seed) | 预置的领域知识实体/三元组,新项目开箱即有基础记忆 |
 | 跨项目克隆(clone_project) | 把既有项目记忆复制为另一 scope(可带过滤器) |
 

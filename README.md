@@ -95,8 +95,9 @@ smilex-memory init --scope user --tool codex zcode   # 只植入指定工具(--t
 # 指定工具注入项目: --tool 取 kimi|claude|codex|cursor|zcode|trae|workbuddy|all
 # Codex 为 TOML 配置(文本级手术合并,保留原有内容/注释),ZCode 写嵌套 mcp.servers
 
-# 初始化即扫描: 冷启动 + 自动读 README + 导入 git 历史/markdown 文档为初始记忆
-# (幂等可重跑;跳过 node_modules/.venv 等目录,stdio 模式写入项目内 .smilex/memory.db)
+# 初始化即扫描: 冷启动 + 自动读 README + 导入 git 历史/markdown 文档/源码结构为初始记忆
+# (源码:.py 走 AST 提取模块文档/顶层定义/依赖,其余扩展名读文件头注释;幂等可重跑,
+#  跳过 node_modules/.venv 等目录,stdio 模式写入项目内 .smilex/memory.db)
 smilex-memory init <项目目录> --stdio --scan
 # agent 侧等价: MCP 工具 memory_init_project(name, project_path="<项目根>")
 # (stdio 模式 project_path 可省略,自动按 db 路径推断项目根)

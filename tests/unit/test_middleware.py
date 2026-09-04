@@ -87,13 +87,17 @@ needs_git = pytest.mark.skipif(shutil.which("git") is None, reason="git 不可�
 
 
 def _make_project_dir(tmp_path, *, with_git: bool = False) -> Path:
-    """临时项目: README + docs/*.md(+ 可选 1 个 git 提交)."""
+    """临时项目: README + docs/*.md + app.py(+ 可选 1 个 git 提交)."""
     (tmp_path / "README.md").write_text(
         "# Demo 项目\n\nBuilt with FastAPI and SQLite.\n", encoding="utf-8"
     )
     docs = tmp_path / "docs"
     docs.mkdir()
     (docs / "arch.md").write_text("# 架构\nUses Redis.\n", encoding="utf-8")
+    (tmp_path / "app.py").write_text(
+        '"""应用入口."""\nimport json\nimport redis\n\n\nclass App:\n    pass\n',
+        encoding="utf-8",
+    )
     if with_git:
         env_git = ["git", "-C", str(tmp_path)]
         subprocess.run(
@@ -117,7 +121,7 @@ async def _scope_entity_ids(mw: MemoryMiddleware, scope: str) -> set[str]:
 
 
 async def test_bootstrap_project_scan_without_git(mw, tmp_path):
-    """无 .git 项目: README 自动读取 + markdown 导入,git 源记入 skipped."""
+    """无 .git 项目: README 自动读取 + markdown/源码导入,git 源记入 skipped."""
     root = _make_project_dir(tmp_path)
     result = await mw.bootstrap_project("demo", project_path=root)
 
@@ -126,8 +130,10 @@ async def test_bootstrap_project_scan_without_git(mw, tmp_path):
     # README 种子(FastAPI)与 markdown 种子(Redis)都落库
     ids = await _scope_entity_ids(mw, result["init"]["scope"])
     assert {"tech:fastapi", "tech:redis"} <= ids
-    # README.md + docs/arch.md 两条 L1 记忆
+    # README.md + docs/arch.md 两条 markdown 记忆;app.py 一条源码记忆(类实体)
     assert result["imports"]["markdown"]["memory_count"] == 2
+    assert result["imports"]["code"]["memory_count"] == 1
+    assert "class:app-py-app" in ids
     assert "git" not in result["imports"]
     assert any("无 .git" in s for s in result["skipped"])
 
@@ -140,15 +146,19 @@ async def test_bootstrap_project_idempotent(mw, tmp_path):
 
     assert r1["init"]["scope"] == r2["init"]["scope"]
     md1, md2 = r1["imports"]["markdown"], r2["imports"]["markdown"]
+    cd1, cd2 = r1["imports"]["code"], r2["imports"]["code"]
     assert md2["memory_count"] == 0
     assert md2["skipped_count"] == md1["memory_count"]
-    # 第一次导入完成后的 scope 总量,第二次 init/markdown 均零新增
-    assert r2["init"]["entity_count"] == md1["entity_count"]
-    assert md2["entity_count"] == md1["entity_count"]
-    assert md2["triple_count"] == md1["triple_count"]
+    assert cd2["memory_count"] == 0
+    assert cd2["skipped_count"] == cd1["memory_count"]
+    # 第一次导入完成(最后一个源 code)后的 scope 总量,第二次 init/markdown/code 均零新增
+    assert r2["init"]["entity_count"] == cd1["entity_count"]
+    assert md2["entity_count"] == cd1["entity_count"]
+    assert cd2["entity_count"] == cd1["entity_count"]
+    assert md2["triple_count"] == cd1["triple_count"]
     # 行级无重复: entity_id 去重后数量一致
     ids = await _scope_entity_ids(mw, r1["init"]["scope"])
-    assert len(ids) == md1["entity_count"]
+    assert len(ids) == cd1["entity_count"]
 
 
 @needs_git
@@ -164,6 +174,16 @@ async def test_bootstrap_project_scan_git(mw, tmp_path):
 async def test_bootstrap_project_rejects_invalid_path(mw, tmp_path):
     with pytest.raises(ValueError, match="project_path"):
         await mw.bootstrap_project("demo", project_path=tmp_path / "nope")
+
+
+async def test_bootstrap_project_scan_toggles(mw, tmp_path):
+    """scan_* 开关: 关闭的源不出现在 imports."""
+    root = _make_project_dir(tmp_path)
+    result = await mw.bootstrap_project(
+        "demo", project_path=root, scan_git=False, scan_markdown=False
+    )
+    assert set(result["imports"]) == {"code"}
+    assert result["skipped"] == []  # 显式关闭不算 skipped
 
 
 # ---------- M.3 write ----------
