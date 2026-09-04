@@ -285,6 +285,18 @@ LongMemEval original 版部分题目 gold 标注歧义(如 multi-session 计数�
 cutoff 凑证据、也不受长 prompt 干扰。判卷经 rejudge.py 离线修正(judge
 思考文本截断曾误记 0 分)。此成绩超过 mem0 官方 94.4(gpt-5)。
 
+**LongMemEval 四格对照(headline = cutoff 200,glm-5.3-flash 作答+判卷)**:
+
+| | original | cleaned |
+|---|---|---|
+| 无抽取 | 93.3% | 93.3% |
+| + 事实抽取 | **96.7%** | **96.7%**(multi-session 满分) |
+
+cleaned+抽取的 30 题中唯一失败是 knowledge-update 新旧值冲突题
+(原文明确说过 "six times now",answerer 抱住了被强调两次的旧值 "four
+times");另观察到 GLM 偶发空返回(同题重试可复现),基础设施层抖动而非
+记忆质量问题。
+
 ### LoCoMo 实测(mem0 口径,2026-09-01)
 
 对话 0-2 各取前 30 题(共 90 题,answerer/judge = glm-5.3-flash):
@@ -298,6 +310,13 @@ cutoff 凑证据、也不受长 prompt 干扰。判卷经 rejudge.py 离线修�
 注意:此为每对话前 30 题的采样(题型分布偏 temporal/multi-hop,
 single-hop 仅 2 题),与 mem0 全量(~1540 题)口径有差异,仅供参考;
 全量可 `uv run python benchmarks/mem0_compat/locomo.py --resume` 续跑。
+
+同采样加 `--fact-extraction` 复测(2026-09-04,123 分钟):headline 持平
+**98.9%**,cutoff=10 由 97.8% 提至 98.9%——与 LongMemEval 结论一致,
+原子事实让小上下文同样够用。剩余唯一 headline 失败为 open-domain
+推断题("John 的学位专业",gold 期望从弱线索推出 Political science,
+而对话文本通篇指向 mechanical engineering),LoCoMo open-domain 标注
+噪声,与无抽取基线同一题。
 
 ### 检索与记忆形成优化(2026-09-02)
 

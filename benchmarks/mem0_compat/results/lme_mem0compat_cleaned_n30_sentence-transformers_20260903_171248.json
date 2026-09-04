@@ -1,0 +1,1025 @@
+{
+  "report": "=== LongMemEval mem0 兼容口径(source=cleaned) — smilex-ai-memory(embedder=sentence-transformers) ===\nanswerer=glm-5.3-flash judge=glm-5.3-flash (mem0 官方为 gpt-5/gpt-5,比较时注意)\n\n== cutoff 10 — n=30, Overall=93.3 % ==\n    knowledge-update           5 题  100.0 %\n    multi-session              5 题  60.0 %\n    single-session-assistant   5 题  100.0 %\n    single-session-preference   5 题  100.0 %\n    single-session-user        5 题  100.0 %\n    temporal-reasoning         5 题  100.0 %\n\n== cutoff 20 — n=30, Overall=96.7 % ==\n    knowledge-update           5 题  100.0 %\n    multi-session              5 题  80.0 %\n    single-session-assistant   5 题  100.0 %\n    single-session-preference   5 题  100.0 %\n    single-session-user        5 题  100.0 %\n    temporal-reasoning         5 题  100.0 %\n\n== cutoff 50 — n=30, Overall=93.3 % ==\n    knowledge-update           5 题  80.0 %\n    multi-session              5 题  80.0 %\n    single-session-assistant   5 题  100.0 %\n    single-session-preference   5 题  100.0 %\n    single-session-user        5 题  100.0 %\n    temporal-reasoning         5 题  100.0 %\n\n== cutoff 200 (headline) — n=30, Overall=93.3 % ==\n    knowledge-update           5 题  80.0 %\n    multi-session              5 题  80.0 %\n    single-session-assistant   5 题  100.0 %\n    single-session-preference   5 题  100.0 %\n    single-session-user        5 题  100.0 %\n    temporal-reasoning         5 题  100.0 %\n\nTotal Time 70.7 min",
+  "records": [
+    {
+      "qid": "18bc8abd",
+      "question_type": "knowledge-update",
+      "question": "What brand of BBQ sauce am I currently obsessed with?",
+      "gold": "Kansas City Masterpiece",
+      "cutoffs": {
+        "10": true,
+        "20": true,
+        "50": true,
+        "200": true
+      },
+      "results": {
+        "10": {
+          "answer": "You're currently obsessed with **Kansas City Masterpiece BBQ sauce** — you've mentioned it's your favorite, especially on ribs. (Before that, Sweet Baby Ray's was your go-to, but Kansas City Masterpiece is the current one.)",
+          "correct": true,
+          "label": "yes"
+        },
+        "20": {
+          "answer": "You're currently obsessed with **Kansas City Masterpiece BBQ sauce** — you mentioned using it on your ribs and it's your current favorite.",
+          "correct": true,
+          "label": "yes"
+        },
+        "50": {
+          "answer": "You're currently obsessed with **Kansas City Masterpiece BBQ sauce** — you mentioned using it on your ribs and that it's your favorite, though you're open to trying other options.",
+          "correct": true,
+          "label": "yes"
+        },
+        "200": {
+          "answer": "You're currently obsessed with **Kansas City Masterpiece BBQ sauce** — you mentioned on June 30th that you've been using it on your ribs. (Previously, Sweet Baby Ray's was your favorite, but your latest preference is Kansas City Masterpiece.)",
+          "correct": true,
+          "label": "yes"
+        }
+      }
+    },
+    {
+      "qid": "06db6396",
+      "question_type": "knowledge-update",
+      "question": "How many projects have I completed since starting painting classes?",
+      "gold": "5",
+      "cutoffs": {
+        "10": true,
+        "20": true,
+        "50": true,
+        "200": true
+      },
+      "results": {
+        "10": {
+          "answer": "You've completed **5 projects** since starting your painting classes. Your most recent one was finished around October 9, 2023 — and no later conversations mention completing anything since then.",
+          "correct": true,
+          "label": "yes"
+        },
+        "20": {
+          "answer": "You've completed **5 projects** since starting your painting classes — you finished your 5th one in early October and mentioned feeling pretty accomplished about it!",
+          "correct": true,
+          "label": "yes"
+        },
+        "50": {
+          "answer": "You've completed **5 projects** since starting your painting classes. You mentioned completing 4 back in August, and then finished your 5th project in early October — congratulations!",
+          "correct": true,
+          "label": "yes"
+        },
+        "200": {
+          "answer": "**You've completed 5 projects** since starting your painting classes.\n\nThis is based on your most recent update (October 9, 2023), where you mentioned you had just finished your 5th project and were feeling pretty accomplished. Earlier in August 2023, you had completed 4 projects, so you've added one more since then.",
+          "correct": true,
+          "label": "yes"
+        }
+      }
+    },
+    {
+      "qid": "618f13b2",
+      "question_type": "knowledge-update",
+      "question": "How many times have I worn my new black Converse Chuck Taylor All Star sneakers?",
+      "gold": "six",
+      "cutoffs": {
+        "10": true,
+        "20": true,
+        "50": false,
+        "200": false
+      },
+      "results": {
+        "10": {
+          "answer": "You've worn your new black Converse Chuck Taylor All Star sneakers **six times** — the latest being when you wore them to run errands (as of our last conversation on May 30).",
+          "correct": true,
+          "label": "yes"
+        },
+        "20": {
+          "answer": "You've worn your new black Converse Chuck Taylor All Star sneakers **six times** so far (as of May 30, 2023 — your most recent update, when you wore them to run errands).",
+          "correct": true,
+          "label": "yes"
+        },
+        "50": {
+          "answer": "",
+          "correct": false,
+          "label": "no"
+        },
+        "200": {
+          "answer": "",
+          "correct": false,
+          "label": "no"
+        }
+      }
+    },
+    {
+      "qid": "5a4f22c0",
+      "question_type": "knowledge-update",
+      "question": "What company is Rachel, an old colleague from my previous company, currently working at?",
+      "gold": "TechCorp",
+      "cutoffs": {
+        "10": true,
+        "20": true,
+        "50": true,
+        "200": true
+      },
+      "results": {
+        "10": {
+          "answer": "Rachel is currently working at **TechCorp**, according to what you mentioned on May 26, 2023.",
+          "correct": true,
+          "label": "yes"
+        },
+        "20": {
+          "answer": "Rachel is currently working at **TechCorp**, according to what you mentioned on May 26, 2023.",
+          "correct": true,
+          "label": "yes"
+        },
+        "50": {
+          "answer": "Rachel is currently working at TechCorp. You mentioned on May 26 that you were thinking about catching up with her — she was the old colleague from your previous company whom you met at the TechConnect conference on February 10–11.",
+          "correct": true,
+          "label": "yes"
+        },
+        "200": {
+          "answer": "Rachel is currently working at **TechCorp**. You mentioned on May 26, 2023, that you were thinking about catching up with her — an old colleague from your previous company — who's now at TechCorp.",
+          "correct": true,
+          "label": "yes"
+        }
+      }
+    },
+    {
+      "qid": "50635ada",
+      "question_type": "knowledge-update",
+      "question": "What was my previous frequent flyer status on United Airlines before I got the current status?",
+      "gold": "Premier Silver",
+      "cutoffs": {
+        "10": true,
+        "20": true,
+        "50": true,
+        "200": true
+      },
+      "results": {
+        "10": {
+          "answer": "Your previous frequent flyer status on United Airlines was **Premier Silver**. You earned it back in September 2022 after hitting 20,000 miles. You've since upgraded to **Premier Gold**, which you mentioned reaching in May 2023 — that's your current status.",
+          "correct": true,
+          "label": "yes"
+        },
+        "20": {
+          "answer": "Your previous status was **Premier Silver**. You earned it back in September 2022 after hitting 20,000 miles, before recently reaching Premier Gold (as of late May 2023).",
+          "correct": true,
+          "label": "yes"
+        },
+        "50": {
+          "answer": "Your previous status was **Premier Silver** — you earned it back in September 2022 when you hit 20,000 miles, before upgrading to your current Premier Gold status (reached as of May 2023).",
+          "correct": true,
+          "label": "yes"
+        },
+        "200": {
+          "answer": "**Premier Silver status.**\n\nHere's the timeline from your memories:\n\n- **September 16, 2022:** You hit 20,000 miles on United and became eligible for **Premier Silver status**.\n- **May 30, 2023:** You mentioned you just reached **Premier Gold status** (your current status).\n\nSo before your current Premier Gold status, you were at the Premier Silver tier.",
+          "correct": true,
+          "label": "yes"
+        }
+      }
+    },
+    {
+      "qid": "5025383b",
+      "question_type": "multi-session",
+      "question": "What are the two hobbies that led me to join online communities?",
+      "gold": "photography and cooking",
+      "cutoffs": {
+        "10": true,
+        "20": true,
+        "50": true,
+        "200": true
+      },
+      "results": {
+        "10": {
+          "answer": "The two hobbies are **photography** and **cooking**:\n\n1. **Photography** – You're into street and portrait photography, and you mentioned that online communities helped you learn a lot, which inspired you to give back by starting a blog to share tutorials and tips.\n\n2. **Cooking** – You joined several online cooking communities, which led you to engage in discussions about recipe techniques and share thoughts on food-related posts.",
+          "correct": true,
+          "label": "yes"
+        },
+        "20": {
+          "answer": "The two hobbies that led you to join online communities are:\n\n1. **Photography** — you've mentioned that online communities have been super helpful for learning Lightroom editing techniques and getting feedback on your work, and you're planning a photography blog to give back to that community.\n\n2. **Cooking** — you joined a few cooking-related communities, which led you to engage in discussions about recipe techniques and share thoughts on food-related posts.",
+          "correct": true,
+          "label": "yes"
+        },
+        "50": {
+          "answer": "The two hobbies that led you to join online communities are:\n\n1. **Photography** – You mentioned the online communities you joined have been super helpful for learning editing techniques in Lightroom and getting feedback on your work (May 29).\n2. **Cooking** – You joined several cooking-related communities, where you've engaged in discussions about recipe techniques and food-related posts (May 30).",
+          "correct": true,
+          "label": "yes"
+        },
+        "200": {
+          "answer": "The two hobbies that led you to join online communities are:\n\n1. **Photography** – You've mentioned that the online communities you've joined have been super helpful for learning Lightroom editing techniques and getting feedback on your work.\n\n2. **Cooking** – You've already joined a few online cooking communities, which led you to engage in discussions about recipe techniques and share your thoughts on food-related posts.",
+          "correct": true,
+          "label": "yes"
+        }
+      }
+    },
+    {
+      "qid": "37f165cf",
+      "question_type": "multi-session",
+      "question": "What was the page count of the two novels I finished in January and March?",
+      "gold": "856",
+      "cutoffs": {
+        "10": false,
+        "20": false,
+        "50": false,
+        "200": false
+      },
+      "results": {
+        "10": {
+          "answer": "The information provided is not enough. None of your memories mention finishing novels in January or March. What I do have:\n\n- **\"The Power\" by Naomi Alderman** — 341 pages, read in December\n- **A 416-page novel** — just finished recently (May)\n- **\"The Nightingale\" by Kristin Hannah** — 440 pages, finished in May\n\nIf you were thinking of a different set of books, let me know and I can help from there.",
+          "correct": false,
+          "label": "no"
+        },
+        "20": {
+          "answer": "The information provided is not enough. None of your memories mention novels finished in January or March. For reference, the novels with recorded page counts are: \"The Nightingale\" (440 pages, finished in May), an unnamed 416-page novel (also finished in May), and \"The Power\" by Naomi Alderman (341 pages, read in December). I don't have any record of novels completed in January or March.",
+          "correct": false,
+          "label": "no"
+        },
+        "50": {
+          "answer": "The information provided is not enough — I don't have any record of novels you finished in January or March.\n\nFor reference, the completed books in your history are:\n- \"The Nightingale\" by Kristin Hannah — 440 pages (finished ~May)\n- An unnamed 416-page novel (finished ~late May)\n- \"The Power\" by Naomi Alderman — 341 pages (read in December over ~5 weeks, so it may have wrapped up around early January)\n\nIf you can remind me of the titles of the January and March novels, I'm happy to help with their page counts.",
+          "correct": false,
+          "label": "no"
+        },
+        "200": {
+          "answer": "The information provided is not enough. Based on the memories, the novels you've mentioned reading recently include:\n\n- **\"The Nightingale\"** by Kristin Hannah — 440 pages (finished before May 22)\n- An unnamed **416-page novel** (finished before May 27)\n- **\"The Power\"** by Naomi Alderman — 341 pages (read in December)\n\nNone of the memories link a novel specifically to being finished in January or March, so I don't have page counts for novels from those months.",
+          "correct": false,
+          "label": "no"
+        }
+      }
+    },
+    {
+      "qid": "2b8f3739",
+      "question_type": "multi-session",
+      "question": "What is the total amount of money I earned from selling my products at the markets?",
+      "gold": "$495",
+      "cutoffs": {
+        "10": true,
+        "20": true,
+        "50": true,
+        "200": true
+      },
+      "results": {
+        "10": {
+          "answer": "You earned a total of **$495** from selling at markets:\n\n- Homemade and Handmade Market (May 29): 15 jars of homemade jam — $225\n- Summer Solstice Market: 20 potted herb plants at $7.50 each — $150\n- Farmers' market (May 15): 12 bunches of fresh organic herbs — $120",
+          "correct": true,
+          "label": "yes"
+        },
+        "20": {
+          "answer": "You earned a total of **$495** from selling your products at the markets:\n\n- **$225** — 15 jars of homemade jam at the Homemade and Handmade Market (May 29th)\n- **$150** — 20 potted herb plants at $7.50 each at the Summer Solstice Market\n- **$120** — 12 bunches of fresh organic herbs at the farmers' market (May 15th)",
+          "correct": true,
+          "label": "yes"
+        },
+        "50": {
+          "answer": "Based on your memories, you earned a total of **$495** from selling at markets:\n\n- **May 15** – Farmers' market: $120 (12 bunches of fresh organic herbs)\n- **May 29** – Homemade and Handmade Market: $225 (15 jars of homemade jam)\n- **Summer Solstice Market**: $150 (20 potted herb plants at $7.50 each)",
+          "correct": true,
+          "label": "yes"
+        },
+        "200": {
+          "answer": "Based on your memories, you've earned a total of **$495** from selling your products at markets:\n\n- **$225** from selling 15 jars of homemade jam at the Homemade and Handmade Market on May 29th\n- **$150** from selling 20 potted herb plants at $7.50 each at the Summer Solstice Market\n- **$120** from selling 12 bunches of fresh organic herbs at the farmers' market on May 15th",
+          "correct": true,
+          "label": "yes"
+        }
+      }
+    },
+    {
+      "qid": "eeda8a6d",
+      "question_type": "multi-session",
+      "question": "How many fish are there in total in both of my aquariums?",
+      "gold": "17",
+      "cutoffs": {
+        "10": false,
+        "20": true,
+        "50": true,
+        "200": true
+      },
+      "results": {
+        "10": {
+          "answer": "The information provided is not enough to give an exact total — your memories mention the species but never the counts. Here's what I do know:\n\n**20-gallon tank:**\n- Neon Tetras (number not specified)\n- Golden Honey Gouramis (described as \"some,\" number not specified)\n- Pleco catfish\n\n**10-gallon tank:**\n- Bubbles the betta (1)\n\nNote: the lemon tetras and zebra danios you discussed were only considerations, never confirmed as purchased, so they aren't included. If you tell me how many tetras, gouramis, and plecos you have, I can total it up for you.",
+          "correct": false,
+          "label": "no"
+        },
+        "20": {
+          "answer": "You have **17 fish in total** across both aquariums:\n\n- **20-gallon tank:** 16 fish — 10 neon tetras, 5 golden honey gouramis, and 1 pleco catfish\n- **10-gallon tank:** 1 fish — your betta, Bubbles\n\n(Note: the lemon tetras or zebra danios you've been considering are still just plans, so they're not counted.)",
+          "correct": true,
+          "label": "yes"
+        },
+        "50": {
+          "answer": "Based on your memories, you have **17 fish total** across both aquariums:\n\n- **20-gallon tank: 16 fish** — 10 neon tetras, 5 golden honey gouramis, and 1 small pleco catfish\n- **10-gallon tank: 1 fish** — Bubbles your betta\n\n(Note: This doesn't include the lemon tetras or zebra danios, since those were only plans to potentially add.)",
+          "correct": true,
+          "label": "yes"
+        },
+        "200": {
+          "answer": "You have **17 fish** in total across both aquariums:\n\n- **20-gallon tank**: 10 neon tetras + 5 golden honey gouramis + 1 pleco catfish = 16 fish\n- **10-gallon tank**: 1 betta fish (Bubbles) = 1 fish",
+          "correct": true,
+          "label": "yes"
+        }
+      }
+    },
+    {
+      "qid": "10d9b85a",
+      "question_type": "multi-session",
+      "question": "How many days did I spend attending workshops, lectures, and conferences in April?",
+      "gold": "3 days",
+      "cutoffs": {
+        "10": true,
+        "20": true,
+        "50": true,
+        "200": true
+      },
+      "results": {
+        "10": {
+          "answer": "You spent **3 days** in April attending workshops and lectures:\n\n1. **April 10** — Lecture on sustainable development at the public library (1 day)\n2. **April 17–18** — 2-day workshop covering standardization/normalization, supervised learning, and deep learning (2 days)\n\nNo conferences are mentioned in your memories for April. (\"1 + 2 = 3\")",
+          "correct": true,
+          "label": "yes"
+        },
+        "20": {
+          "answer": "You spent **3 days** in April attending these events:\n- **April 10**: A lecture on sustainable development at the public library (1 day)\n- **April 17–18**: A 2-day workshop covering standardization, normalization, supervised learning, and deep learning",
+          "correct": true,
+          "label": "yes"
+        },
+        "50": {
+          "answer": "You spent **3 days** attending workshops, lectures, and conferences in April:\n\n- **April 10**: Lecture on sustainable development at the public library (1 day)\n- **April 17–18**: 2-day workshop covering standardization, normalization, supervised learning, and deep learning (2 days)",
+          "correct": true,
+          "label": "yes"
+        },
+        "200": {
+          "answer": "Based on your memories, you spent **3 days** attending such events in April:\n\n- **April 10** – Lecture on sustainable development at the public library (1 day)\n- **April 17–18** – 2-day workshop covering standardization, normalization, supervised learning, and deep learning (2 days)",
+          "correct": true,
+          "label": "yes"
+        }
+      }
+    },
+    {
+      "qid": "1568498a",
+      "question_type": "single-session-assistant",
+      "question": "I'm looking back at our previous chess game and I was wondering, what was the move you made after 27. Kg2 Bd5+?",
+      "gold": "28. Kg3",
+      "cutoffs": {
+        "10": true,
+        "20": true,
+        "50": true,
+        "200": true
+      },
+      "results": {
+        "10": {
+          "answer": "After 27...Bd5+, I played **28. Kg3**. That's confirmed in the game record from our May 21 session, where the position continued 27. Kg2 Bd5+ 28. Kg3 Be6. (My follow-up move after your Be6 was 29. Rd3.)",
+          "correct": true,
+          "label": "yes"
+        },
+        "20": {
+          "answer": "After 27. Kg2 Bd5+, my move was **28. Kg3** — moving the king out of check and to a safer square away from the coming checks on the diagonal.",
+          "correct": true,
+          "label": "yes"
+        },
+        "50": {
+          "answer": "After 27. Kg2 Bd5+, my move as White was **28. Kg3** — stepping the king out of check. You then replied with 28...Be6, attacking the rook and gaining control of the e-file.",
+          "correct": true,
+          "label": "yes"
+        },
+        "200": {
+          "answer": "Based on our chess game from May 21st, after **27. Kg2 Bd5+**, the move made was:\n\n**28. Kg3**\n\n(Your response to that was 28... Be6, and then I played 29. Rd3.)",
+          "correct": true,
+          "label": "yes"
+        }
+      }
+    },
+    {
+      "qid": "1b9b7252",
+      "question_type": "single-session-assistant",
+      "question": "I wanted to follow up on our previous conversation about mindfulness techniques. You mentioned some great resources for guided imagery exercises, can you remind me of the website that had free exercises like 'The Mountain Meditation' and 'The Body Scan Meditation'?",
+      "gold": "Mindful.org.",
+      "cutoffs": {
+        "10": true,
+        "20": true,
+        "50": true,
+        "200": true
+      },
+      "results": {
+        "10": {
+          "answer": "The website was **Mindful.org** — it offers free guided imagery exercises, including \"The Mountain Meditation\" and \"The Body Scan Meditation.\"",
+          "correct": true,
+          "label": "yes"
+        },
+        "20": {
+          "answer": "The website is **Mindful.org**. It includes free guided imagery exercises such as \"The Mountain Meditation\" and \"The Body Scan Meditation.\"",
+          "correct": true,
+          "label": "yes"
+        },
+        "50": {
+          "answer": "The website was **Mindful.org** — it includes free guided imagery exercises such as \"The Mountain Meditation\" and \"The Body Scan Meditation,\" along with other mindfulness resources.",
+          "correct": true,
+          "label": "yes"
+        },
+        "200": {
+          "answer": "The website you're looking for is **Mindful.org**. As mentioned in our conversation on May 25th, Mindful.org includes guided imagery exercises that you can use for free, including \"The Mountain Meditation\" and \"The Body Scan Meditation\" that you're referencing.",
+          "correct": true,
+          "label": "yes"
+        }
+      }
+    },
+    {
+      "qid": "41275add",
+      "question_type": "single-session-assistant",
+      "question": "I wanted to follow up on our previous conversation about YouTube videos for workplace posture. Can you remind me of the Mayo Clinic video you recommended?",
+      "gold": "The video is 'How to Sit Properly at a Desk to Avoid Back Pain' and the link is https://www.youtube.com/watch?v=UfOvNlX9Hh0.",
+      "cutoffs": {
+        "10": true,
+        "20": true,
+        "50": true,
+        "200": true
+      },
+      "results": {
+        "10": {
+          "answer": "Of course! The Mayo Clinic video I recommended was **\"How to Sit Properly at a Desk to Avoid Back Pain\"** — you can find it here: https://www.youtube.com/watch?v=UfOvNlX9Hh0\n\nIt demonstrates proper desk sitting posture and tips for avoiding back pain, making it a great resource to share with your staff.",
+          "correct": true,
+          "label": "yes"
+        },
+        "20": {
+          "answer": "The Mayo Clinic video I recommended was:\n\n**\"How to Sit Properly at a Desk to Avoid Back Pain\"** — https://www.youtube.com/watch?v=UfOvNlX9Hh0\n\nFeel free to share it with your staff alongside the other options (Harvard Health Publishing, Ohio State Wexner Medical Center, and Healthline videos) if you'd like!",
+          "correct": true,
+          "label": "yes"
+        },
+        "50": {
+          "answer": "Yes! On May 23rd, I recommended the Mayo Clinic video: **\"How to Sit Properly at a Desk to Avoid Back Pain\"** — you can find it here: https://www.youtube.com/watch?v=UfOvNlX9Hh0\n\nThat conversation also included videos from Harvard Health Publishing, Ohio State University Wexner Medical Center, and Healthline if you'd like those links again.",
+          "correct": true,
+          "label": "yes"
+        },
+        "200": {
+          "answer": "From our conversation on May 23rd, the Mayo Clinic video I recommended was:\n\n**\"How to Sit Properly at a Desk to Avoid Back Pain\"**\nhttps://www.youtube.com/watch?v=UfOvNlX9Hh0\n\nIt demonstrates proper desk posture and tips for avoiding back pain. If you'd like, the other videos I shared included ones from Harvard Health Publishing, Ohio State University Wexner Medical Center, and Healthline.",
+          "correct": true,
+          "label": "yes"
+        }
+      }
+    },
+    {
+      "qid": "4388e9dd",
+      "question_type": "single-session-assistant",
+      "question": "I was going through our previous chat and I was wondering, what was Andy wearing in the script you wrote for the comedy movie scene?",
+      "gold": "Andy was wearing an untidy, stained white shirt.",
+      "cutoffs": {
+        "10": true,
+        "20": true,
+        "50": true,
+        "200": true
+      },
+      "results": {
+        "10": {
+          "answer": "In the comedy script I wrote, Andy was wearing an **untidy, stained white shirt**. This was mentioned both in the character description and in the opening scene, where he's standing in front of the department's whiteboard — a fitting detail given his character's poor personal hygiene and lack of self-awareness!",
+          "correct": true,
+          "label": "yes"
+        },
+        "20": {
+          "answer": "In the script from our May 20 conversation, Andy was wearing an **untidy, stained white shirt** — fitting his character as the overconfident but disheveled Head of Computing.",
+          "correct": true,
+          "label": "yes"
+        },
+        "50": {
+          "answer": "In the script, Andy was wearing an **untidy, stained white shirt**. This was mentioned in his character description and appeared again in the scene where he stood in front of the department's whiteboard, consistent with his portrayal as having poor personal hygiene.",
+          "correct": true,
+          "label": "yes"
+        },
+        "200": {
+          "answer": "Andy was wearing an **untidy, stained white shirt** in the comedy movie script from our chat on May 20th.",
+          "correct": true,
+          "label": "yes"
+        }
+      }
+    },
+    {
+      "qid": "8752c811",
+      "question_type": "single-session-assistant",
+      "question": "I remember you provided a list of 100 prompt parameters that I can specify to influence your output. Can you remind me what was the 27th parameter on that list?",
+      "gold": "The 27th parameter was 'Sound effects (e.g., ambient, diegetic, non-diegetic, etc.)'.",
+      "cutoffs": {
+        "10": true,
+        "20": true,
+        "50": true,
+        "200": true
+      },
+      "results": {
+        "10": {
+          "answer": "The 27th parameter on that list was **Sound effects** (e.g., ambient, diegetic, non-diegetic, etc.).",
+          "correct": true,
+          "label": "yes"
+        },
+        "20": {
+          "answer": "The 27th parameter on that list was **Sound effects (e.g., ambient, diegetic, non-diegetic, etc.)**.",
+          "correct": true,
+          "label": "yes"
+        },
+        "50": {
+          "answer": "Looking at the memory from Monday, May 22, 2023, where I provided the list of 100 prompt parameters, the 27th parameter on that list was:\n\n**27. Sound effects** (e.g., ambient, diegetic, non-diegetic, etc.)",
+          "correct": true,
+          "label": "yes"
+        },
+        "200": {
+          "answer": "The 27th parameter on that list was **Sound effects** (e.g., ambient, diegetic, non-diegetic, etc.).",
+          "correct": true,
+          "label": "yes"
+        }
+      }
+    },
+    {
+      "qid": "75f70248",
+      "question_type": "single-session-preference",
+      "question": "I've been sneezing quite a bit lately. Do you think it might be my living room?",
+      "gold": "The user would prefer responses that consider the potential impact of their cat, Luna, and her shedding on their sneezing, as well as the recent deep clean of the living room and its possible effect on stirring up dust. They might not prefer responses that fail to take into account these specific details previously mentioned, such as generic suggestions or unrelated factors.",
+      "cutoffs": {
+        "10": true,
+        "20": true,
+        "50": true,
+        "200": true
+      },
+      "results": {
+        "10": {
+          "answer": "It's quite possible. Based on what you've shared, your living room has two common sneeze triggers: dust buildup and a cat that sheds a lot. Pet dander and dust are among the most frequent causes of sneezing indoors.\n\nA few things worth trying from the plan we discussed earlier this week:\n\n- **Vacuum 2x a week** with a HEPA-filter vacuum (or consider a robot vacuum for high-traffic areas)\n- **Dust with a damp microfiber cloth** so particles get trapped instead of stirred up\n- **Use a lint roller** on furniture to pick up loose cat hair\n- **Groom your cat regularly** and wash their bedding — this cuts dander significantly\n- **Replace your air filters** every 1–3 months\n- **Add pet-safe air-purifying plants** like a spider plant or snake plant — both were on your list and are hardy, low-maintenance options\n\nIf the sneezing continues despite this, it might be worth considering whether allergies are involved — in that case, keeping the cat out of the bedroom can help.",
+          "correct": true,
+          "label": "yes"
+        },
+        "20": {
+          "answer": "It's quite possible! Based on what you've shared before, your living room has two common sneezing triggers:\n\n1. **Your cat's shedding** – pet dander and hair are frequent allergy/sneeze culprits, especially on furniture and carpets.\n2. **Dust buildup** – you mentioned the living room collects dust easily.\n\nA few things that could help, building on what we discussed:\n- Vacuum twice a week with a HEPA filter, and use a lint roller on furniture\n- Dust with a damp microfiber cloth rather than a dry duster\n- Brush your cat regularly (outdoors or in a ventilated area) to cut down on loose hair\n- Check/replace your air filters\n- Follow through on that spider plant or snake plant you were considering — they can help improve air quality\n\nIf sneezing persists even after a thorough cleaning, it might be worth considering whether the allergies are coming from somewhere else (like the bedroom), but the living room is a very reasonable first suspect given your cat and dust situation.",
+          "correct": true,
+          "label": "yes"
+        },
+        "50": {
+          "answer": "It's quite possible! Based on what you've shared before, your living room has two common sneeze triggers: **dust and cat dander** — you mentioned your cat sheds a lot, and you've already been working on keeping that room dust-free.\n\nA few things that could help, building on your existing plan:\n- **Follow through on the spider or snake plant** you were planning to get — it can help improve air quality.\n- **Vacuum regularly with a HEPA filter** (the pet-hair vacuum you were researching would be ideal).\n- **Damp-dust surfaces and wash your cat's bedding** to cut down on dander buildup.\n- Keep the cat's shedding areas groomed regularly to reduce loose hair.\n\nIf sneezing continues even in other rooms, it might be worth considering other causes — but the living room, with the shedding cat and dust, is a very reasonable suspect.",
+          "correct": true,
+          "label": "yes"
+        },
+        "200": {
+          "answer": "Based on what you've shared before, your living room could definitely be a factor. You have a cat that sheds a lot, and you mentioned concerns about dust and pet hair in your living room just a few days ago (May 26). Cat dander and accumulated dust are common triggers for sneezing and allergies.\n\nA few things that could help:\n\n- You mentioned getting a spider plant or snake plant for air purification — if you haven't yet, that could help.\n- You were also looking into pet-hair vacuum cleaners — regular vacuuming with a HEPA filter would reduce dander and dust.\n- Washing your cat's bedding and brushing them regularly can also reduce allergens in the room.\n\nIt might be worth doing a deep clean of the living room to see if your sneezing improves!",
+          "correct": true,
+          "label": "yes"
+        }
+      }
+    },
+    {
+      "qid": "06878be2",
+      "question_type": "single-session-preference",
+      "question": "Can you suggest some accessories that would complement my current photography setup?",
+      "gold": "The user would prefer suggestions of Sony-compatible accessories or high-quality photography gear that can enhance their photography experience. They may not prefer suggestions of other brands' equipment or low-quality gear.",
+      "cutoffs": {
+        "10": true,
+        "20": true,
+        "50": true,
+        "200": true
+      },
+      "results": {
+        "10": {
+          "answer": "Based on your setup, here are some accessories that would complement it well:\n\n**For your Sony A7R IV + Godox V1:**\n1. **Tripod** – Essential for your candle product shots; a sturdy one with a ball head gives you consistent framing and lets you shoot at low ISOs for crisp product images.\n2. **Light modifiers** – A small softbox or diffusion dome for the Godox V1 would soften light on your candle jars and reduce harsh glare on glass/wax.\n3. **Reflector kit** – 5-in-1 collapsible reflectors are cheap and perfect for filling shadows in your scene styling (works great with those natural props like wood and botanicals).\n4. **Remote shutter release** – Eliminates camera shake for sharp product photos, especially with longer exposures.\n5. **Prime lens (e.g., a 50mm or 90mm macro)** – Great for detail shots of candle textures and labels.\n\n**Already on your radar:**\n- **Camera bag** – You were comparing options last week; Think Tank Photo or Peak Design would pair nicely with your kit.\n- **Godox V1 case/pouch** – The Vello pouch (budget) or Godox hard case (more protection) were the standouts from our discussion.\n\nSince you're styling scenes for your eco-friendly candles, a set of seamless backdrop papers or reclaimed wood boards would also tie directly into the photography you're already doing.",
+          "correct": true,
+          "label": "yes"
+        },
+        "20": {
+          "answer": "Based on your setup — Sony A7R IV, Godox V1 flash, and Gitzo GT3543LS tripod — here are accessories that would pair well:\n\n1. **Remote shutter release** — eliminates camera shake for sharp candle product shots, especially with long exposures.\n2. **Reflector/diffuser kit** — softens natural window light, which is ideal for your eco-friendly candle photography.\n3. **Light tent or portable lightbox** — gives you clean, consistent backgrounds for your product listings.\n4. **Spare batteries and fast memory cards** — the A7R IV's high-resolution files drain batteries and fill cards quickly.\n5. **Macro lens** (e.g., Sony 90mm f/2.8) — perfect for the close-up wax texture and wick detail shots you want for your candles.\n6. **That camera bag upgrade** — you were already considering brands like Peak Design, Think Tank, or Lowepro, which would round out your kit nicely.\n\nThese build directly on what you already own and support your candle business photography.",
+          "correct": true,
+          "label": "yes"
+        },
+        "50": {
+          "answer": "Based on your photography setup (Sony A7R IV + the Godox V1 flash you decided on), here are accessories that would complement it:\n\n1. **Tripod** – You were considering the Gitzo GT3543LS, which pairs well with your camera for stable, heavy-duty shooting.\n2. **Camera bag** – You were already eyeing brands like Think Tank Photo, Lowepro, and Peak Design — a good next step to carry the A7R IV and new flash together.\n3. **External battery pack** – The Anker PowerCore 20000 PD ($60) can charge your A7R IV on the go via USB-C PD.\n4. **Flash protection** – A case or pouch for your new Godox V1 (e.g., the budget-friendly Vello Flash Pouch or the official Godox hard case).\n5. **For your candle product photography**: a light tent/lightbox, reflectors, and a remote shutter release would help you capture those clean, well-lit shots for your shop and future seasonal lines.\n\nThese build directly on the gear decisions you've already made.",
+          "correct": true,
+          "label": "yes"
+        },
+        "200": {
+          "answer": "Based on your current setup — Sony A7R IV, Sony 24-70mm f/2.8, your new Godox V1 flash, and the Gitzo GT3543LS tripod you've been looking at — here are some accessories that would round it out nicely:\n\n1. **Extra NP-FZ100 batteries** – The A7R IV is battery-hungry, especially with the 24-70mm f/2.8. Spares are essential for long shoots.\n2. **High-speed SD cards (UHS-II)** – The A7R IV's 61MP files and burst shooting demand fast write speeds. Look at Sony Tough or ProGrade cards.\n3. **Wireless remote shutter release** – Perfect pairing with the Gitzo tripod for tack-sharp long exposures and self-portraits.\n4. **Filters for the 24-70mm (82mm thread)** – A circular polarizer for outdoor glare/saturation, and an ND filter for creative motion blur.\n5. **Godox wireless trigger (X2T-S or XPro-S)** – Lets you fire the V1 off-camera, unlocking far more creative lighting setups (great for your product photography too).\n6. **Quality camera strap or harness** – A comfortable strap (Peak Design Slide is a popular choice) helps on long shoots.\n\nSince you chose the Godox V1, staying within the Godox ecosystem (triggers, later an AD200) is a smart path for building a lighting kit. And since you shoot product photos for your candle business, the off-camera flash trigger would likely be the highest-impact first addition.",
+          "correct": true,
+          "label": "yes"
+        }
+      }
+    },
+    {
+      "qid": "6b7dfb22",
+      "question_type": "single-session-preference",
+      "question": "I've been feeling a bit stuck with my paintings lately. Do you have any ideas on how I can find new inspiration?",
+      "gold": "The user would prefer responses that build upon their existing sources of inspiration, such as revisiting Instagram art accounts or exploring new techniques from online tutorials. They might also appreciate suggestions that revisit previous themes they found enjoyable, like painting flowers. The user would not prefer generic or vague suggestions for finding inspiration, and would likely appreciate responses that utilize their recent 30-day painting challenge experience.",
+      "cutoffs": {
+        "10": true,
+        "20": true,
+        "50": true,
+        "200": true
+      },
+      "results": {
+        "10": {
+          "answer": "Based on what you've been into lately, here are some ways to shake things up:\n\n1. **Paint from life, not just Instagram**: You've been browsing flower paintings — try setting up real flowers (or herbs from your balcony garden!) as subjects. Painting your own herb garden could blend two of your current passions and give you fresh, personal material.\n\n2. **Push your texture experiments**: You were exploring palette knife techniques — lean into that with a series of abstract or heavily textured flower pieces.\n\n3. **Use the 30-day challenge structure**: Give each week a theme (e.g., week 1: flowers, week 2: textures, week 3: cocktail still-lifes). Constraints often spark creativity.\n\n4. **Paint on unexpected surfaces**: Tie in your upcycling interest — try painting on denim from those old jeans or reclaimed wood for a mixed-media twist.\n\n5. **Paint with connection in mind**: You mentioned solo activities haven't felt fulfilling — consider sharing works-in-progress online as you prep to sell your paintings, or joining a local art group. Feedback and community can be a huge source of inspiration.\n\nSince you're already mid-challenge and selling online is on your radar, even picking one new subject (like your herb garden) could refresh the whole series.",
+          "correct": true,
+          "label": "yes"
+        },
+        "20": {
+          "answer": "Since you're already deep in your 30-day painting challenge and drawing inspiration from flower paintings on Instagram, here are a few fresh angles based on things you love:\n\n1. **Paint your balcony herb garden** – You're already growing fresh herbs; botanical still-lifes of them (or herbs tucked into a cocktail glass) would be a natural extension of your flower work.\n2. **Explore impermanence visually** – You've been reflecting on this since the meditation retreat in April. A series on fading, wilting, or transforming subjects could give your work a deeper theme.\n3. **Push the palette knife further** – You wanted more texture; try fully abstract texture studies to break out of a representational rut.\n4. **Use movies as mood boards** – With 15 films watched in 3 months, pull color palettes or scenes from favorites for painting prompts.\n5. **Mix in upcycled materials** – Ties into your DIY interest; collage denim or found objects into canvases for mixed-media pieces.\n\nAny of these could also double as strong pieces for your future online shop!",
+          "correct": true,
+          "label": "yes"
+        },
+        "50": {
+          "answer": "Feeling stuck happens to every artist! Based on what you've been working on, here are some ideas tailored to you:\n\n1. **Paint from your herb garden** – You started that balcony herb garden recently; herbs like basil, rosemary, and thyme make great botanical subjects and extend the flower work you've been doing.\n\n2. **Still-life setups** – Use items you already own, like your vintage-style clock, vases, or framed photos from your shelf display. They'd make interesting composition subjects.\n\n3. **Lean into texture** – You were exploring palette knife techniques for texture; a texture-focused challenge (same subject, different textural approaches) could shake things up.\n\n4. **Expand your Instagram inspiration** – Flower paintings on Instagram have been your go-to; try following artists in other styles or joining art challenge hashtags to see fresh approaches.\n\n5. **Engage with your 30-day painting challenge community** – Connecting with other participants could spark ideas and keep you motivated, which might also help with the social reconnection you mentioned wanting.\n\nSince you're mid-challenge, even swapping your usual subject for a day (e.g., painting herbs or a still life instead of flowers) could break the rut.",
+          "correct": true,
+          "label": "yes"
+        },
+        "200": {
+          "answer": "Based on what you've shared, here are some ideas to get unstuck:\n\n1. **Paint from your herb garden** – You started a small herb garden on your balcony; fresh basil, mint, and rosemary make great botanical subjects, and you already enjoy flower paintings on Instagram. Sketch or paint them from life.\n\n2. **Push the palette knife textures** – You recently asked about impasto and texture techniques but may not have explored them yet. A texture-focused piece (or a series) could break the monotony.\n\n3. **Use your own photos** – Since you're scanning and organizing old photos (Tokyo trip, graduations), turn some of those memories into reference material for paintings with personal meaning.\n\n4. **Music-inspired pieces** – You listen to David Gilmour and Stevie Ray Vaughan; try translating a song's mood into color and texture on canvas.\n\n5. **Refresh the 30-day challenge** – Your painting challenge is still fresh; give it a twist, like \"one texture technique per day\" or \"botanicals only,\" to re-engage.\n\n6. **Look ahead to Spain** – If your trip pushes through, the Alhambra's architecture and Andalusian light are rich subjects to sketch or photograph now for future paintings.\n\nSince you're already setting up a small studio space, dedicating a wall to inspiration (photos, color studies, swatches) could also help spark your next piece.",
+          "correct": true,
+          "label": "yes"
+        }
+      }
+    },
+    {
+      "qid": "195a1a1b",
+      "question_type": "single-session-preference",
+      "question": "Can you suggest some activities that I can do in the evening?",
+      "gold": "The user would prefer suggestions that involve relaxing activities that can be done in the evening, preferably before 9:30 pm. They would not prefer suggestions that involve using their phone or watching TV, as these activities have been affecting their sleep quality.",
+      "cutoffs": {
+        "10": true,
+        "20": true,
+        "50": true,
+        "200": true
+      },
+      "results": {
+        "10": {
+          "answer": "Based on what you've shared, here are some evening activities that fit your interests and routine:\n\n1. **Guided meditation** – You were already looking into meditation apps for relaxing before bed, so an evening session (e.g., Headspace, Calm, Insight Timer) fits perfectly with your wind-down routine.\n\n2. **Gentle yoga or stretching** – With 8 weeks of yoga completed and your new joint-friendly exercise routine, some light evening stretches would complement that nicely without being too stimulating before sleep.\n\n3. **Painting** – Your cityscape project (fabric stamping + drybrushing) is a great creative wind-down activity, though keep in mind a sunset cityscape might be best enjoyed in natural light — you could do prep work or detail touches in the evening.\n\n4. **Journaling or reflection** – This came up around your upcoming lake trip to honor your dad's memory; evening is a natural time for it, and it helps clear your mind before bed.\n\n5. **Reading** – A calm, non-stimulating book is a solid pre-bed activity.\n\nOne tip from your bedtime goal (winding down by 9:30 pm): try to avoid screens and intense workouts in the last hour before sleep — a leisurely evening walk earlier in the evening would work well for staying active.",
+          "correct": true,
+          "label": "yes"
+        },
+        "20": {
+          "answer": "Based on your recent habits and goals, here are some evening activities that fit you well:\n\n1. **Gentle yoga or stretching** – You just finished 8 weeks of yoga classes, so a short evening flow would maintain your flexibility gains and help you unwind.\n2. **Guided meditation before bed** – You were already looking into apps like Headspace, Calm, or Insight Timer for exactly this.\n3. **Reading** – A low-stimulation book fits perfectly into the wind-down routine we discussed (aiming for lights out around 9:30 pm).\n4. **Working on your cityscape painting** – Your fabric stamping and drybrushing project is a great creative way to relax in the evening.\n5. **Journaling** – This could also double as emotional prep for your upcoming lake town trip to honor your dad's memory.\n6. **A leisurely evening walk** – Easy on the joints, which suits your new low-impact exercise routine.\n7. **Cooking a light dinner** – Like the kale and carrot soup you were planning — a calm, satisfying way to end the day.\n\nOne tip: keep screens away for the last ~30 minutes before bed so they don't interfere with your sleep routine.",
+          "correct": true,
+          "label": "yes"
+        },
+        "50": {
+          "answer": "Based on your routine and preferences (winding down by 9:30 pm, minimizing screens before bed), here are some evening ideas that fit your life:\n\n**Early evening (6:30–8:00 pm):**\n- **Work on your cityscape painting** – you've been enjoying fabric stamping and drybrushing with your new acrylics; evenings are a great time to add textures and details at a relaxed pace.\n- **Watch an indie film** – since you curate your community center's film festival program, an early-evening screening doubles as prep work (just keep it before your 8:30 wind-down window).\n- **Review and plan** – your schedule already includes a 6:00–6:30 pm wrap-up: update your task list and plan tomorrow.\n\n**Wind-down (8:00–9:30 pm):**\n- **Gentle yoga or stretching** – a nice extension of the flexibility gains from your 8-week classes.\n- **Guided imagery or meditation** – you mentioned wanting guided imagery to process emotions and meditation apps for sleep; doing this consistently before bed could be your nightly anchor.\n- **Journaling** – writing down memories and reflections can help process your emotions and clear your mind before sleep (it also ties into the memory book idea for honoring your loved ones).\n- **Reading** with soothing music, then screens off by ~9:15 pm per your wind-down plan.\n\nThese all align with your structured style and your goal of a restful 9:30 pm bedtime.",
+          "correct": true,
+          "label": "yes"
+        },
+        "200": {
+          "answer": "Based on your wind-down goal of being asleep by 9:30 pm and your established habits, here are some evening activities that fit you well:\n\n1. **Guided meditation** – You were planning to try the \"Body Scan\" meditation on Insight Timer tonight. Continuing your meditation practice before bed would build on what's already worked for you.\n2. **Journaling** – You could use evenings to keep your dream journal (especially since your dreams have been vivid lately) or do some reflective writing — just not full morning pages.\n3. **Light knitting** – Working on your beanie in the evening is a calm, screen-free way to unwind.\n4. **Reading** – A low-stimulation way to relax as bedtime approaches.\n5. **Gentle stretching** – A few light yoga stretches to release tension from the day.\n\nA few things to avoid in the evening, given your goals: screens and social media in the last 30+ minutes before bed, and stimulating activities — this lines up with the device detox you wanted as part of your 9:30 pm wind-down routine.",
+          "correct": true,
+          "label": "yes"
+        }
+      }
+    },
+    {
+      "qid": "a89d7624",
+      "question_type": "single-session-preference",
+      "question": "I'm planning a trip to Denver soon. Any suggestions on what to do there?",
+      "gold": "The user would prefer responses that take into account their previous experience in Denver, specifically their interest in live music and memorable encounter with Brandon Flowers. They might appreciate suggestions that revisit or build upon this experience, such as revisiting the same bar or exploring similar music venues in the area. The user may not prefer general tourist recommendations or activities unrelated to their interest in live music.",
+      "cutoffs": {
+        "10": true,
+        "20": true,
+        "50": true,
+        "200": true
+      },
+      "results": {
+        "10": {
+          "answer": "Based on your previous Denver trip — where you saw The Killers at Red Rocks and met Brandon Flowers — here's what I'd suggest for your return:\n\n**Live Music (your thing!)**\n- **Red Rocks Amphitheatre** — you're already planning a concert there; arrive early as you mentioned to grab dinner beforehand\n- **The Ogden Theatre & Bluebird Theater** — historic, intimate venues in town\n- **The Fillmore Auditorium** — iconic, has hosted legends like The Grateful Dead\n- **Larimer Lounge & The hi-dive** — great smaller spots to discover new acts\n\n**BBQ near Red Rocks** (since you asked about this before)\n- **GQue BBQ** (Golden, ~10-15 min away) — brisket, ribs, sausage\n- **Moe's Original BBQ** (Wheat Ridge) — Southern-style\n- **Wayne's Smoke Shack** (Morrison) — just minutes from the amphitheater\n\n**Other music-related stops**\n- **Twist & Shout Records** — legendary record store, perfect for a vinyl lover\n- Check festival calendars — depending on your dates, things like the Westword Music Showcase or Riot Fest Denver (September) might line up\n\nSince you loved the music scene last time, catching a show at one of the smaller venues plus a BBQ dinner before your Red Rocks concert would make a great repeat visit!",
+          "correct": true,
+          "label": "yes"
+        },
+        "20": {
+          "answer": "Given your love for Denver's music scene and your upcoming Red Rocks concert plans, here's what I'd suggest:\n\n**Build on your existing plans:**\n- You're already set on dinner at **The Ship Rock Grille** before the concert — great choice with its view of the rocks.\n- Since you enjoyed meeting Brandon Flowers after The Killers show, keep an eye out for shows at the venues that fit your taste: **The Ogden Theatre**, **The Bluebird Theater**, **The Fillmore Auditorium**, and the intimate **Larimer Lounge** and **hi-dive**.\n\n**Festivals to check while you're there:**\n- **Westword Music Showcase** (one-day, great for discovering local acts) and the **Denver Jazz Festival**. If your trip extends to September, **Riot Fest Denver** could be worth catching.\n\n**Food:**\n- For pre-concert BBQ near Red Rocks: **Wayne's Smoke Shack** in Morrison is just minutes from the amphitheater, or **GQue BBQ** in Golden.\n\n**Active option:**\n- Since you've been wanting to try trail running, **Red Rocks Park itself has trails** — you could squeeze in a morning run with iconic scenery before your concert day.\n\nHave a great trip!",
+          "correct": true,
+          "label": "yes"
+        },
+        "50": {
+          "answer": "Since you've already got a Red Rocks concert planned and dinner lined up at The Ship Rock Grille (with its outdoor patio views), here's what I'd suggest based on your love for Denver's music scene:\n\n**Music Venues** (since you loved The Killers show):\n- **The Ogden Theatre** and **The Bluebird Theater** – historic, intimate venues in the heart of the city\n- **The Fillmore Auditorium** – legendary spot that's hosted The Grateful Dead and Jimi Hendrix\n- **Larimer Lounge** and **The hi-dive** – smaller, laid-back venues great for discovering new acts\n\n**Record Shopping:**\n- **Twist & Shout Records** – a legendary store with an impressive vinyl and CD selection, perfect for a music enthusiast like you\n\n**Food near Red Rocks:**\n- **GQue BBQ** (Golden) or **Moe's Original BBQ** (Wheat Ridge) are both within a 10–20 minute drive if you want to keep the BBQ idea going beyond The Ship Rock Grille\n\n**Festivals** (depending on when you go): **Riot Fest Denver** in September could align well with your alt/rock tastes.\n\nYou might also try squeezing in a run along one of the trails near Red Rocks to mix your training in with the trip. Have a great time back in Denver!",
+          "correct": true,
+          "label": "yes"
+        },
+        "200": {
+          "answer": "Based on your previous trip to Denver (where you caught The Killers at Red Rocks and met Brandon Flowers!), here are some suggestions tailored to your interests:\n\n**Music Scene:**\n- **Red Rocks Amphitheatre** – You already know how special it is; check if any shows line up with your trip dates\n- **The Ogden Theatre, Bluebird Theater, or Fillmore Auditorium** – Historic venues with great lineups\n- **Twist & Shout Records** – A legendary record store that would be perfect for your vinyl collection (great spot to hunt for another find like your Sgt. Pepper's!)\n\n**If you're catching a show at Red Rocks:**\n- Grab dinner beforehand at **The Ship Rock Grille** (patio with red rock views) or BBQ at **GQue BBQ** in Golden or **Wayne's Smoke Shack** in Morrison\n\n**Fitness:**\n- Since you're training for your June 19th triathlon, the trails around Red Rocks and the foothills offer scenic runs with some hill work — perfect for those hill repeats you've been adding to your routine!\n\nGiven your love of the city's music scene, I'd prioritize the venues and Twist & Shout — you might discover some new bands for your concert list!",
+          "correct": true,
+          "label": "yes"
+        }
+      }
+    },
+    {
+      "qid": "faba32e5",
+      "question_type": "single-session-user",
+      "question": "How long did Alex marinate the BBQ ribs in special sauce?",
+      "gold": "24 hours",
+      "cutoffs": {
+        "10": true,
+        "20": true,
+        "50": true,
+        "200": true
+      },
+      "results": {
+        "10": {
+          "answer": "Alex marinated the BBQ ribs in his special sauce for **24 hours** before grilling them.",
+          "correct": true,
+          "label": "yes"
+        },
+        "20": {
+          "answer": "Alex marinated his BBQ ribs in the special sauce for **24 hours** before grilling them.",
+          "correct": true,
+          "label": "yes"
+        },
+        "50": {
+          "answer": "Alex marinated his BBQ ribs in a special sauce for **24 hours** before grilling them to perfection.",
+          "correct": true,
+          "label": "yes"
+        },
+        "200": {
+          "answer": "Alex marinated the BBQ ribs in his special sauce for **24 hours** before grilling them to perfection, according to what he told you.",
+          "correct": true,
+          "label": "yes"
+        }
+      }
+    },
+    {
+      "qid": "bc8a6e93_abs",
+      "question_type": "single-session-user",
+      "question": "What did I bake for my uncle's birthday party?",
+      "gold": "You did not mention this information. You mentioned baking for your niece's birthday party but not your uncle's",
+      "cutoffs": {
+        "10": true,
+        "20": true,
+        "50": true,
+        "200": true
+      },
+      "results": {
+        "10": {
+          "answer": "The information provided is not enough — I don't have any record of you baking for your uncle's birthday party. The closest thing in our conversations is the lemon blueberry cake you made for your niece's birthday party, but that's a different occasion.",
+          "correct": true,
+          "label": "yes"
+        },
+        "20": {
+          "answer": "I don't have any information about you baking for an uncle's birthday party — that doesn't appear in our conversations. The closest thing on record is the **lemon blueberry cake** you made for your **niece's** birthday party, which you said was a big hit.",
+          "correct": true,
+          "label": "yes"
+        },
+        "50": {
+          "answer": "The information provided is not enough. There's no record of you baking anything for an uncle's birthday party. The only birthday baking in your history is a lemon blueberry cake you made for your **niece's** birthday party — a different occasion.",
+          "correct": true,
+          "label": "yes"
+        },
+        "200": {
+          "answer": "The information provided is not enough. I don't have any record of you baking something for your uncle's birthday party.\n\nThe only baking-related memory I have is a lemon blueberry cake you made for your **niece's** birthday party — that's a different occasion and person, so I can't assume it applies here.",
+          "correct": true,
+          "label": "yes"
+        }
+      }
+    },
+    {
+      "qid": "60d45044",
+      "question_type": "single-session-user",
+      "question": "What type of rice is my favorite?",
+      "gold": "Japanese short-grain rice",
+      "cutoffs": {
+        "10": true,
+        "20": true,
+        "50": true,
+        "200": true
+      },
+      "results": {
+        "10": {
+          "answer": "Your favorite rice is **Japanese short-grain rice** — you mentioned it yourself when asking about Japanese-style dishes to make with it.",
+          "correct": true,
+          "label": "yes"
+        },
+        "20": {
+          "answer": "Your favorite rice is **Japanese short-grain rice** — you mentioned this in the context of making Japanese-style dishes like onigiri, grilled chicken, and vegetable dishes.",
+          "correct": true,
+          "label": "yes"
+        },
+        "50": {
+          "answer": "Your favorite rice is **Japanese short-grain rice**. You mentioned this on May 27, 2023, when asking for simple Japanese-style dishes to make with it — and we went over recipes like yakitori-style grilled chicken, teriyaki chicken, and onigiri that pair well with it.",
+          "correct": true,
+          "label": "yes"
+        },
+        "200": {
+          "answer": "Your favorite type of rice is **Japanese short-grain rice** — you mentioned it as such when asking for Japanese-style dishes to pair with it, and it's also the ideal rice for making onigiri.",
+          "correct": true,
+          "label": "yes"
+        }
+      }
+    },
+    {
+      "qid": "c8c3f81d",
+      "question_type": "single-session-user",
+      "question": "What brand are my favorite running shoes?",
+      "gold": "Nike",
+      "cutoffs": {
+        "10": true,
+        "20": true,
+        "50": true,
+        "200": true
+      },
+      "results": {
+        "10": {
+          "answer": "Your favorite running shoe brand is **Nike**. You mentioned that Nike has been your favorite brand for running shoes, and you use Nike shoes for your daily 5K runs.",
+          "correct": true,
+          "label": "yes"
+        },
+        "20": {
+          "answer": "Your favorite running shoes are **Nike**. You mentioned they've been your favorite brand for running shoes, and you use them for your daily 5K runs. You bought your current pair at the outlet mall in April with 20% off.",
+          "correct": true,
+          "label": "yes"
+        },
+        "50": {
+          "answer": "Your favorite running shoes are **Nike**. You mentioned that Nike has been your favorite brand for running shoes — you use them for your daily 5K runs, and you bought your current pair at an outlet mall in April at 20% off. (The exact model wasn't identified in our conversations.)",
+          "correct": true,
+          "label": "yes"
+        },
+        "200": {
+          "answer": "Nike. You've mentioned that Nike has been your favorite brand for running shoes, and you currently use a pair for your daily 5K runs — you bought them at the outlet mall in April at 20% off and were looking for the same model or similar.",
+          "correct": true,
+          "label": "yes"
+        }
+      }
+    },
+    {
+      "qid": "75499fd8",
+      "question_type": "single-session-user",
+      "question": "What breed is my dog?",
+      "gold": "Golden Retriever",
+      "cutoffs": {
+        "10": true,
+        "20": true,
+        "50": true,
+        "200": true
+      },
+      "results": {
+        "10": {
+          "answer": "Your dog Max is a **Golden Retriever**. This came up in our conversation on May 25, 2023, when we were discussing collar options for him — his friendly, energetic nature and active lifestyle fit the breed well.",
+          "correct": true,
+          "label": "yes"
+        },
+        "20": {
+          "answer": "Your dog Max is a **Golden Retriever**. This came up in our conversation on May 25 about picking out a collar and name tag for him, where we discussed options suited to Golden Retrievers like Max — durable, comfortable collars for his active lifestyle.",
+          "correct": true,
+          "label": "yes"
+        },
+        "50": {
+          "answer": "Your dog Max is a **Golden Retriever**. You mentioned this when asking about collar recommendations for him — and it's why I suggested brands like Yellow Dog Design, whose durable nylon collar you ended up choosing for his active lifestyle.",
+          "correct": true,
+          "label": "yes"
+        },
+        "200": {
+          "answer": "Your dog, Max, is a Golden Retriever — you mentioned this when asking about collar recommendations suited to \"a Golden Retriever like Max.\"",
+          "correct": true,
+          "label": "yes"
+        }
+      }
+    },
+    {
+      "qid": "0bb5a684",
+      "question_type": "temporal-reasoning",
+      "question": "How many days before the team meeting I was preparing for did I attend the workshop on 'Effective Communication in the Workplace'?",
+      "gold": "7 days. 8 days (including the last day) is also acceptable.",
+      "cutoffs": {
+        "10": true,
+        "20": true,
+        "50": true,
+        "200": true
+      },
+      "results": {
+        "10": {
+          "answer": "You attended the \"Effective Communication in the Workplace\" workshop on **January 10th**, and your team meeting is on **January 17th** — so the workshop was **7 days before** the team meeting.",
+          "correct": true,
+          "label": "yes"
+        },
+        "20": {
+          "answer": "You attended the \"Effective Communication in the Workplace\" workshop on January 10th, and your team meeting is on January 17th — so the workshop was **7 days** before the meeting.",
+          "correct": true,
+          "label": "yes"
+        },
+        "50": {
+          "answer": "You attended the \"Effective Communication in the Workplace\" workshop on **January 10th**, and your team meeting is scheduled for **January 17th** — so the workshop was **7 days before** the meeting.",
+          "correct": true,
+          "label": "yes"
+        },
+        "200": {
+          "answer": "You attended the \"Effective Communication in the Workplace\" workshop on January 10th, and your team meeting is scheduled for January 17th — so the workshop was **7 days before** the meeting.",
+          "correct": true,
+          "label": "yes"
+        }
+      }
+    },
+    {
+      "qid": "e4e14d04",
+      "question_type": "temporal-reasoning",
+      "question": "How long had I been a member of 'Book Lovers Unite' when I attended the meetup?",
+      "gold": "Two weeks",
+      "cutoffs": {
+        "10": true,
+        "20": true,
+        "50": true,
+        "200": true
+      },
+      "results": {
+        "10": {
+          "answer": "You had been a member of 'Book Lovers Unite' for about **1–2 weeks** when you attended the meetup. You joined the Facebook group roughly three weeks ago (around May 7), and the meetup took place last week (around mid-May), so you'd only recently become a member at that point.",
+          "correct": true,
+          "label": "yes"
+        },
+        "20": {
+          "answer": "You had been a member of \"Book Lovers Unite\" for roughly **1–2 weeks** when you attended the meetup. You joined the Facebook group about three weeks ago (around May 7), and the meetup took place last week (around May 15–21).",
+          "correct": true,
+          "label": "yes"
+        },
+        "50": {
+          "answer": "You had been a member of \"Book Lovers Unite\" for roughly **one to two weeks** when you attended the meetup.\n\n- You joined the Facebook group about three weeks before May 28, 2023 — so around **May 7, 2023**.\n- You attended the meetup (where you discussed the latest John Grisham bestseller) \"last week,\" which places it around **May 14–21, 2023**.\n\nSo at the time of the meetup, you'd only been part of the group for about a week and a half.",
+          "correct": true,
+          "label": "yes"
+        },
+        "200": {
+          "answer": "Based on your memories: you joined the \"Book Lovers Unite\" Facebook group about three weeks ago (around May 7, 2023), and you attended the meetup last week (around May 15–21), so you had been a member for only about **one to two weeks** when you attended the meetup.",
+          "correct": true,
+          "label": "yes"
+        }
+      }
+    },
+    {
+      "qid": "gpt4_af6db32f",
+      "question_type": "temporal-reasoning",
+      "question": "How many days ago did I watch the Super Bowl?",
+      "gold": "17 days ago. 18 days (including the last day) is also acceptable.",
+      "cutoffs": {
+        "10": true,
+        "20": true,
+        "50": true,
+        "200": true
+      },
+      "results": {
+        "10": {
+          "answer": "You watched the Super Bowl on February 12, 2023, which was **17 days ago**.",
+          "correct": true,
+          "label": "yes"
+        },
+        "20": {
+          "answer": "You watched the Super Bowl on Sunday, February 12, 2023, at your friend's house. That was **17 days ago** (from today, March 1, 2023).",
+          "correct": true,
+          "label": "yes"
+        },
+        "50": {
+          "answer": "You watched the Super Bowl on **Sunday, February 12, 2023** (at your friend's house). That was **17 days ago** from today (March 1, 2023).",
+          "correct": true,
+          "label": "yes"
+        },
+        "200": {
+          "answer": "You watched the Super Bowl **17 days ago**, on Sunday, February 12, 2023, at your friend's house.",
+          "correct": true,
+          "label": "yes"
+        }
+      }
+    },
+    {
+      "qid": "gpt4_78cf46a3",
+      "question_type": "temporal-reasoning",
+      "question": "Which event happened first, the narrator losing their phone charger or the narrator receiving their new phone case?",
+      "gold": "Receiving the new phone case",
+      "cutoffs": {
+        "10": true,
+        "20": true,
+        "50": true,
+        "200": true
+      },
+      "results": {
+        "10": {
+          "answer": "Receiving the new phone case happened first. According to the memories, the user got their new phone case about a month ago (around late April 2023), while they lost their phone charger at the gym about two weeks ago (around mid-May 2023).",
+          "correct": true,
+          "label": "yes"
+        },
+        "20": {
+          "answer": "Receiving the new phone case happened first. You mentioned getting your new phone case about a month ago (around late April 2023), while you lost your phone charger at the gym about two weeks ago (around mid-May 2023).",
+          "correct": true,
+          "label": "yes"
+        },
+        "50": {
+          "answer": "Receiving the new phone case happened first. You mentioned getting your new phone case about a month ago (around late April 2023), while you lost your phone charger at the gym about two weeks ago (around mid-May 2023) — so the case came first by roughly two weeks.",
+          "correct": true,
+          "label": "yes"
+        },
+        "200": {
+          "answer": "The narrator received their new phone case first — about a month before May 26 (~late April 2023) — while the phone charger was lost at the gym more recently, about two weeks before the charger conversation (~mid-May 2023). So the new phone case came before the lost charger.",
+          "correct": true,
+          "label": "yes"
+        }
+      }
+    },
+    {
+      "qid": "gpt4_4ef30696",
+      "question_type": "temporal-reasoning",
+      "question": "How many days passed between the day I finished reading 'The Nightingale' and the day I started reading 'The Hitchhiker's Guide to the Galaxy'?",
+      "gold": "1 day. 2 days (including the last day) is also acceptable.",
+      "cutoffs": {
+        "10": true,
+        "20": true,
+        "50": true,
+        "200": true
+      },
+      "results": {
+        "10": {
+          "answer": "1 day passed — you finished 'The Nightingale' on January 15, 2022, and started 'The Hitchhiker's Guide to the Galaxy' on January 16, 2022.",
+          "correct": true,
+          "label": "yes"
+        },
+        "20": {
+          "answer": "**1 day** passed. You finished 'The Nightingale' on Saturday, January 15, 2022, and started 'The Hitchhiker's Guide to the Galaxy' the very next day, Sunday, January 16, 2022.",
+          "correct": true,
+          "label": "yes"
+        },
+        "50": {
+          "answer": "**1 day.** You finished 'The Nightingale' on Saturday, January 15, 2022, and started 'The Hitchhiker's Guide to the Galaxy' the very next day, Sunday, January 16, 2022.",
+          "correct": true,
+          "label": "yes"
+        },
+        "200": {
+          "answer": "**1 day.** You finished 'The Nightingale' on January 15, 2022, and started 'The Hitchhiker's Guide to the Galaxy' on January 16, 2022.",
+          "correct": true,
+          "label": "yes"
+        }
+      }
+    }
+  ]
+}
