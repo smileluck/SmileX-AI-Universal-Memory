@@ -74,7 +74,8 @@ src/smilex/
 
 ## 服务化使用(MCP + Web 面板)
 
-把记忆库作为 MCP 服务接入 Kimi Code / Claude Code 等 Agent 工具:
+把记忆库作为 MCP 服务接入主流 Agent 工具:Kimi / Claude Code / Codex / Cursor /
+ZCode / Trae 一键注入配置,WorkBuddy 输出手动接入指引(MCP 由其客户端 UI 管理)。
 
 ```bash
 # 安装(核心库零新依赖,server 相关依赖按需装)
@@ -86,6 +87,13 @@ smilex-memory init <项目目录> --guide   # 一键注入 MCP 配置 + 记忆�
 
 # 方式二: 项目级 stdio — 独立库 <项目>/.smilex/memory.db
 smilex-memory init <项目目录> --stdio
+
+# 方式三: 植入工具全局(--scope user,HTTP) — 一次配置,所有项目生效
+smilex-memory init --scope user                      # codex/cursor/zcode/trae/claude(kimi 仅项目级)
+smilex-memory init --scope user --tool codex zcode   # 只植入指定工具(--tool 可多值)
+
+# 指定工具注入项目: --tool 取 kimi|claude|codex|cursor|zcode|trae|workbuddy|all
+# Codex 为 TOML 配置(文本级手术合并,保留原有内容/注释),ZCode 写嵌套 mcp.servers
 
 # 初始化即扫描: 冷启动 + 自动读 README + 导入 git 历史/markdown 文档为初始记忆
 # (幂等可重跑;跳过 node_modules/.venv 等目录,stdio 模式写入项目内 .smilex/memory.db)

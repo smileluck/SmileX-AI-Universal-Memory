@@ -26,6 +26,12 @@
   一键完成(stdio 写项目内库,HTTP 直写全局库)
 - **冷启动 scope 按项目名复用**: 同名项目重复 `initialize_project`
   不再新建 scope(按稳定 entity_id 查回),重复初始化/扫描幂等
+- **主流编码工具植入**: `smilex-memory init` 新增 Codex(TOML 文本级手术
+  合并,保留原有内容/注释)/ Cursor / ZCode(嵌套 `mcp.servers`,条目
+  最小化)/ Trae 适配器与 WorkBuddy 手动接入指引;`--scope user` 写工具
+  全局配置(`~/.codex/config.toml`、`~/.cursor/mcp.json`、
+  `~/.zcode/cli/config.json`、`~/.claude.json` 等,仅 HTTP 模式);
+  `--tool` 支持多值;stdio 条目自动解析绝对路径(GUI 工具无 shell PATH)
 - markdown 目录扫描忽略规则: 跳过 node_modules/.venv/dist 等依赖与
   构建目录及隐藏目录;`ImportSource.max_files`(默认 500)截断
 - Benchmark 工具链四套: LongMemEval / LoCoMo(自家严口径)、

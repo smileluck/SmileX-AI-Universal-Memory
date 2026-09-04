@@ -87,7 +87,8 @@ lifespan:启动时初始化 MemoryService(早暴露 db 错误)→ 可选调度�
 ```
 smilex-memory serve [--db ...] [--host ...] [--port ...]   # 全局常驻
 smilex-memory mcp [--db ...]                               # stdio(项目级)
-smilex-memory init <项目目录> [--tool kimi|claude|all] [--stdio] [--guide] [--url ...]
+smilex-memory init [项目目录] [--tool <工具>...|all] [--scope project|user]
+                   [--stdio] [--guide] [--scan] [--url ...]
 smilex-memory doctor                                       # 环境自检
 ```
 
@@ -95,9 +96,33 @@ smilex-memory doctor                                       # 环境自检
 
 - **非破坏性合并**:保留目标项目已有其他 MCP server 配置
 - **幂等**:同名牌同配置跳过;同名不同配置先备份 `.bak` 再覆盖
+- **双 scope**:`--scope project` 写项目内配置;`--scope user` 写工具全局配置
+  (仅 HTTP 模式,项目目录可省略)
 - `--guide`:向 `AGENTS.md`(Claude 另有 `CLAUDE.md`)追加记忆使用约定,
   以 `<!-- smilex-memory-guide -->` 标记幂等
 - 新增工具支持 = 写一个 `ToolAdapter` 子类并注册到 `ADAPTERS`
+  (类属性:`servers_key` 定位 JSON server 表,支持嵌套元组;`kind` =
+  `"json"`/`"toml"`/`"manual"`;`user_config_path()` 声明用户级配置)
+
+适配器总表(注册名 → 配置位置与格式):
+
+| 工具 | name | 项目级 | 用户级 | 格式 |
+|------|------|--------|--------|------|
+| Kimi Code | `kimi` | `.kimi-code/mcp.json` | — | JSON `mcpServers` |
+| Claude Code | `claude` | `.mcp.json` | `~/.claude.json` | JSON `mcpServers` |
+| Codex | `codex` | `.codex/config.toml` | `~/.codex/config.toml` | TOML `[mcp_servers.X]` |
+| Cursor | `cursor` | `.cursor/mcp.json` | `~/.cursor/mcp.json` | JSON `mcpServers` |
+| ZCode | `zcode` | `.zcode/config.json` | `~/.zcode/cli/config.json` | JSON 嵌套 `mcp.servers`(schema 严格,条目最小化) |
+| Trae | `trae` | `.trae/mcp.json` | `Application Support/{Trae CN,Trae}/User/mcp.json`(探测存在者) | JSON `mcpServers` |
+| WorkBuddy | `workbuddy` | — | — | manual(MCP 由客户端 UI 管理,打印连接器 JSON + 步骤) |
+
+特殊实现说明:
+
+- **Codex(TOML)**:`_inject_toml_config` 做**文本级手术**——`tomllib` 解析判断
+  幂等/覆盖,正则删除目标段(到下一个顶层 `[` 段)后在文件尾追加新段,其余内容
+  与注释 byte-for-byte 保留(不用 tomli-w 整体重写,避免破坏用户配置)
+- **stdio 条目绝对路径**:`shutil.which("smilex-memory")` 解析回填
+  (GUI 启动的工具没有 shell PATH),解析失败回退字面量
 
 ### 3.5 常驻注册脚本(`scripts/`)
 
@@ -115,7 +140,8 @@ smilex-memory doctor                                       # 环境自检
 pip install 'smilex-ai-memory[server]'
 smilex-memory serve &          # 或先用注册脚本设为常驻
 smilex-memory init D:\proj\foo --guide   # 一键注入 MCP 配置 + 使用约定
-# 之后在 Kimi Code / Claude Code 中打开该项目即可用 mcp__smilex-memory__* 工具
+# 之后在 Kimi Code / Claude Code / Codex / Cursor / ZCode / Trae 中打开该项目
+# 即可用 mcp__smilex-memory__* 工具(WorkBuddy 按打印的指引在 UI 中添加)
 ```
 
 ## 5. 设计取舍

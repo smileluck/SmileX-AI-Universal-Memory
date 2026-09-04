@@ -3,7 +3,8 @@
 命令:
 - serve:   全局常驻 HTTP 服务(MCP streamable-http + Web 面板)
 - mcp:     stdio MCP 模式(项目独立库场景)
-- init:    一键注入 MCP 配置到 Agent 工具的项目(Kimi Code / Claude Code);
+- init:    一键注入 MCP 配置到 Agent 工具(Kimi/Claude/Codex/Cursor/ZCode/Trae,
+           WorkBuddy 输出手动接入指引);支持 --scope project|user;
            --scan 时冷启动并扫描项目(README/git 历史/markdown)生成初始记忆
 - doctor:  环境自检(配置 / db / 端口 / 服务可达性)
 
@@ -15,8 +16,10 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import re
 import shutil
 import sys
+import tomllib
 from pathlib import Path
 
 from .server.config import DEFAULT_CONFIG_PATH, load_config, write_config_template
@@ -44,22 +47,31 @@ _GUIDE_TEXT = f"""
 
 
 class ToolAdapter:
-    """Agent 工具 MCP 配置适配器协议(新增工具 = 加子类 + 注册到 ADAPTERS)."""
+    """Agent 工具 MCP 配置适配器协议(新增工具 = 加子类 + 注册到 ADAPTERS).
+
+    - kind: "json"(默认,写入 servers_key 定位的表)/ "toml"(codex)/ "manual"(只打印指引)
+    - servers_key: JSON 内 server 表的位置,支持嵌套元组(ZCode 为 ("mcp", "servers"))
+    - user_config_path: 用户级(--scope user)配置绝对路径;None = 不支持用户级
+    """
 
     name: str = ""
     config_rel_path: str = ""  # 相对项目根目录的配置文件路径
+    servers_key: str | tuple[str, ...] = "mcpServers"
+    kind: str = "json"
 
     def config_path(self, project_dir: Path) -> Path:
         return project_dir / self.config_rel_path
+
+    def user_config_path(self) -> Path | None:
+        return None
 
     def http_entry(self, url: str) -> dict:
         return {"url": url}
 
     def stdio_entry(self, db_path: Path) -> dict:
-        return {
-            "command": "smilex-memory",
-            "args": ["mcp", "--db", str(db_path)],
-        }
+        # GUI 启动的工具(Cursor/Trae 等)没有 shell PATH,尽量解析绝对路径
+        command = shutil.which(MCP_SERVER_NAME) or MCP_SERVER_NAME
+        return {"command": command, "args": ["mcp", "--db", str(db_path)]}
 
     def guide_files(self, project_dir: Path) -> list[Path]:
         """--guide 时要写入使用约定的文件."""
@@ -75,51 +87,229 @@ class ClaudeCodeAdapter(ToolAdapter):
     name = "claude"
     config_rel_path = ".mcp.json"
 
+    def user_config_path(self) -> Path | None:
+        return Path.home() / ".claude.json"
+
     def guide_files(self, project_dir: Path) -> list[Path]:
         return [project_dir / "CLAUDE.md", project_dir / "AGENTS.md"]
 
 
+class CodexAdapter(ToolAdapter):
+    name = "codex"
+    config_rel_path = ".codex/config.toml"
+    kind = "toml"
+
+    def user_config_path(self) -> Path | None:
+        return Path.home() / ".codex" / "config.toml"
+
+
+class CursorAdapter(ToolAdapter):
+    name = "cursor"
+    config_rel_path = ".cursor/mcp.json"
+
+    def user_config_path(self) -> Path | None:
+        return Path.home() / ".cursor" / "mcp.json"
+
+
+class ZCodeAdapter(ToolAdapter):
+    """ZCode 的 mcp.servers schema 严格:未知键会静默丢弃整台 server,条目保持最小."""
+
+    name = "zcode"
+    config_rel_path = ".zcode/config.json"
+    servers_key = ("mcp", "servers")
+
+    def user_config_path(self) -> Path | None:
+        return Path.home() / ".zcode" / "cli" / "config.json"
+
+    def http_entry(self, url: str) -> dict:
+        return {"type": "http", "url": url}
+
+    def stdio_entry(self, db_path: Path) -> dict:
+        return {"type": "stdio", **super().stdio_entry(db_path)}
+
+
+class TraeAdapter(ToolAdapter):
+    name = "trae"
+    config_rel_path = ".trae/mcp.json"
+
+    def user_config_path(self) -> Path | None:
+        # IDE 版全局配置在 Application Support 下,CN/国际目录取存在者
+        user_dir = Path.home() / "Library" / "Application Support"
+        for variant in ("Trae CN", "Trae"):
+            if (user_dir / variant / "User").is_dir():
+                return user_dir / variant / "User" / "mcp.json"
+        return None
+
+
+class WorkBuddyAdapter(ToolAdapter):
+    """WorkBuddy 的 MCP 由客户端 UI 管理(连接器目录含加密凭据),只输出手动指引."""
+
+    name = "workbuddy"
+    kind = "manual"
+
+    def manual_instructions(self, *, url: str, stdio: bool, db_path: Path | None) -> str:
+        if stdio:
+            entry = {"type": "stdio",
+                     **super().stdio_entry(db_path or Path(".smilex/memory.db"))}
+        else:
+            entry = {"type": "streamableHttp", "url": url}
+        snippet = json.dumps(
+            {"mcpServers": {MCP_SERVER_NAME: entry}}, ensure_ascii=False, indent=2
+        )
+        return (
+            "1. 打开 WorkBuddy 客户端 → 连接器 → 自定义连接器 / MCP 服务管理 → 添加\n"
+            "2. 粘贴以下 JSON(HTTP 模式需先启动 smilex-memory serve):\n"
+            f"{snippet}\n"
+            "3. 保存后在工具列表确认出现 mcp__smilex-memory__ 前缀的工具"
+        )
+
+
 ADAPTERS: dict[str, ToolAdapter] = {
-    a.name: a for a in (KimiCodeAdapter(), ClaudeCodeAdapter())
+    a.name: a
+    for a in (
+        KimiCodeAdapter(),
+        ClaudeCodeAdapter(),
+        CodexAdapter(),
+        CursorAdapter(),
+        ZCodeAdapter(),
+        TraeAdapter(),
+        WorkBuddyAdapter(),
+    )
 }
 
 
-def inject_tool_config(
-    adapter: ToolAdapter,
-    project_dir: Path,
-    *,
-    url: str,
-    stdio: bool = False,
-) -> tuple[Path, str]:
-    """非破坏性合并写入工具的 MCP 配置,返回 (配置文件路径, 动作描述).
+def _key_path(servers_key: str | tuple[str, ...]) -> tuple[str, ...]:
+    return (servers_key,) if isinstance(servers_key, str) else servers_key
 
-    - 文件不存在: 新建
-    - 已有其他 server: 合并保留
-    - 同名 server 已存在且内容一致: 幂等跳过;不一致: 备份 .bak 后覆盖
-    """
-    config_path = adapter.config_path(project_dir)
-    entry = (
-        adapter.stdio_entry(project_dir / ".smilex" / "memory.db")
-        if stdio
-        else adapter.http_entry(url)
+
+def _toml_value(value: object) -> str:
+    """序列化注入条目所需的受限 TOML 值(str / list[str] / bool)."""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, str):
+        escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+        return f'"{escaped}"'
+    if isinstance(value, list):
+        return "[" + ", ".join(_toml_value(v) for v in value) + "]"
+    raise ValueError(f"不支持的 TOML 值类型: {type(value).__name__}")
+
+
+def _toml_section(entry: dict) -> str:
+    lines = [f"[mcp_servers.{MCP_SERVER_NAME}]"]
+    for key, value in entry.items():
+        lines.append(f"{key} = {_toml_value(value)}")
+    return "\n".join(lines) + "\n"
+
+
+def _strip_toml_section(text: str) -> str:
+    # 删除目标段(段头允许行尾注释/空白;兼容裸键与引号键两种写法)
+    name = re.escape(MCP_SERVER_NAME)
+    pattern = re.compile(
+        rf"(?ms)^\[mcp_servers\.(?:{name}|\"{name}\"|'{name}')[^\n]*\n(.*?)(?=^\[|\Z)"
     )
+    return pattern.sub("", text)
 
-    data: dict = {"mcpServers": {}}
+
+def _inject_toml_config(config_path: Path, entry: dict) -> tuple[Path, str]:
+    """codex 用 TOML 配置:文本级手术,保留其余内容与注释 byte-for-byte."""
+    text = ""
     action = "新建"
     if config_path.exists():
-        data = json.loads(config_path.read_text(encoding="utf-8"))
-        data.setdefault("mcpServers", {})
-        existing = data["mcpServers"].get(MCP_SERVER_NAME)
+        text = config_path.read_text(encoding="utf-8")
+        try:
+            parsed = tomllib.loads(text)
+        except tomllib.TOMLDecodeError as exc:
+            raise ValueError(f"现有 {config_path} 不是合法 TOML,请先修复: {exc}") from exc
+        existing = parsed.get("mcp_servers", {}).get(MCP_SERVER_NAME)
         if existing == entry:
             return config_path, "已存在(幂等跳过)"
         if existing is not None:
             backup = config_path.with_suffix(config_path.suffix + ".bak")
             shutil.copy2(config_path, backup)
             action = f"覆盖(旧配置备份到 {backup.name})"
+            text = _strip_toml_section(text)
         else:
             action = "合并"
 
-    data["mcpServers"][MCP_SERVER_NAME] = entry
+    section = _toml_section(entry)
+    if text.strip():
+        if not text.endswith("\n"):
+            text += "\n"
+        text += "\n" + section  # 空行分隔,与已有内容合并
+    else:
+        text = section
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(text, encoding="utf-8")
+    return config_path, action
+
+
+def inject_tool_config(
+    adapter: ToolAdapter,
+    project_dir: Path | None,
+    *,
+    url: str,
+    stdio: bool = False,
+    scope: str = "project",
+) -> tuple[Path, str]:
+    """非破坏性合并写入工具的 MCP 配置,返回 (配置文件路径, 动作描述).
+
+    - scope="project" 写项目内配置;scope="user" 写 user_config_path()(仅 HTTP)
+    - 文件不存在: 新建;已有其他 server: 合并保留
+    - 同名 server 已存在且内容一致: 幂等跳过;不一致: 备份 .bak 后覆盖
+    - TOML 适配器(codex)做文本级手术,其余内容 byte-for-byte 保留
+    """
+    if scope == "user":
+        config_path = adapter.user_config_path()
+        if config_path is None:
+            raise ValueError(
+                f"{adapter.name} 不支持用户级配置"
+                f"(用项目级: init <项目目录> --tool {adapter.name})"
+            )
+        if stdio:
+            raise ValueError("用户级仅支持 HTTP 模式(指向全局 serve,无项目独立库)")
+    else:
+        if project_dir is None:
+            raise ValueError("项目级注入需要提供项目目录")
+        config_path = adapter.config_path(project_dir)
+
+    entry = (
+        adapter.stdio_entry(project_dir / ".smilex" / "memory.db")
+        if stdio
+        else adapter.http_entry(url)
+    )
+    if adapter.kind == "toml":
+        return _inject_toml_config(config_path, entry)
+
+    data: dict = {}
+    file_existed = config_path.exists()
+    if file_existed:
+        try:
+            data = json.loads(config_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"现有 {config_path} 不是合法 JSON,请先修复: {exc}") from exc
+        if not isinstance(data, dict):
+            raise ValueError(f"现有 {config_path} 顶层不是 JSON 对象")
+
+    servers: dict = data
+    for key in _key_path(adapter.servers_key):
+        node = servers.get(key)
+        if node is None:
+            node = servers[key] = {}
+        if not isinstance(node, dict):
+            raise ValueError(f"现有 {config_path} 中 {key!r} 不是对象,无法合并")
+        servers = node
+
+    existing = servers.get(MCP_SERVER_NAME)
+    if existing == entry:
+        return config_path, "已存在(幂等跳过)"
+    if existing is not None:
+        backup = config_path.with_suffix(config_path.suffix + ".bak")
+        shutil.copy2(config_path, backup)
+        action = f"覆盖(旧配置备份到 {backup.name})"
+    else:
+        action = "合并" if file_existed else "新建"
+
+    servers[MCP_SERVER_NAME] = entry
     config_path.parent.mkdir(parents=True, exist_ok=True)
     config_path.write_text(
         json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
@@ -206,37 +396,90 @@ def _run_scan(project_dir: Path, *, stdio: bool) -> int:
     return 0
 
 
+# 各工具注入后的针对性提示
+_TOOL_HINTS = {
+    "kimi": "Kimi Code 首次打开需在信任提示中选择 Trust",
+    "claude": "Claude Code 需在项目内确认启用 MCP server",
+    "codex": "Codex 需重启会话生效;项目级配置需先将项目加入信任列表",
+    "cursor": "Cursor 需重启或 Reload Window 后在 MCP 面板确认已启用",
+    "zcode": "ZCode 需重启会话;若 server 未加载,检查配置是否被未知字段拖累",
+    "trae": "Trae 需在 MCP 面板中确认 smilex-memory 已启用",
+    "workbuddy": "WorkBuddy 按上方指引在客户端 UI 中完成添加",
+}
+
+
 def _cmd_init(args: argparse.Namespace) -> int:
-    project_dir = Path(args.project_dir).resolve()
-    if not project_dir.is_dir():
-        print(f"错误: 项目目录不存在: {project_dir}", file=sys.stderr)
-        return 1
+    if args.scope == "user":
+        if args.stdio:
+            print("错误: --scope user 仅支持 HTTP 模式(用户级无项目独立库)",
+                  file=sys.stderr)
+            return 1
+        if args.scan:
+            print("错误: --scope user 不支持 --scan(无项目目录)", file=sys.stderr)
+            return 1
+        project_dir = None
+    else:
+        if not args.project_dir:
+            print("错误: 项目级注入需要提供 project_dir(--scope user 可省略)",
+                  file=sys.stderr)
+            return 1
+        project_dir = Path(args.project_dir).resolve()
+        if not project_dir.is_dir():
+            print(f"错误: 项目目录不存在: {project_dir}", file=sys.stderr)
+            return 1
 
     config = load_config()
     url = args.url or config.mcp_url
-    tools = list(ADAPTERS) if args.tool == "all" else [args.tool]
+    tools = list(ADAPTERS) if "all" in args.tool else list(dict.fromkeys(args.tool))
+    handled: list[str] = []
 
     for name in tools:
         adapter = ADAPTERS[name]
-        path, action = inject_tool_config(
-            adapter, project_dir, url=url, stdio=args.stdio
-        )
+        if adapter.kind == "manual":
+            print(f"[{name}] 需手动接入(无可安全写入的配置文件):")
+            for line in adapter.manual_instructions(
+                url=url,
+                stdio=args.stdio,
+                db_path=project_dir / ".smilex" / "memory.db" if project_dir else None,
+            ).splitlines():
+                print(f"    {line}")
+            handled.append(name)
+            continue
+        try:
+            path, action = inject_tool_config(
+                adapter, project_dir, url=url, stdio=args.stdio, scope=args.scope
+            )
+        except ValueError as exc:
+            print(f"[{name}] 跳过: {exc}", file=sys.stderr)
+            continue
         print(f"[{name}] {action}: {path}")
+        handled.append(name)
 
     if args.guide:
-        for name in tools:
-            for path in inject_guide(project_dir, ADAPTERS[name].guide_files(project_dir)):
-                print(f"[{name}] 已追加使用约定: {path}")
+        if project_dir is None:
+            print("\n--scope user 不注入 AGENTS.md 使用约定(无项目目录)")
+        else:
+            for name in handled:
+                if ADAPTERS[name].kind == "manual":
+                    continue
+                for path in inject_guide(
+                    project_dir, ADAPTERS[name].guide_files(project_dir)
+                ):
+                    print(f"[{name}] 已追加使用约定: {path}")
 
     if args.scan:
         _run_scan(project_dir, stdio=args.stdio)
 
-    if not args.stdio:
-        print(f"\n指向全局服务: {url}(先启动 smilex-memory serve)")
-    else:
+    if args.stdio:
         print(f"\n使用项目独立库: {project_dir / '.smilex' / 'memory.db'}(stdio 模式)")
-    print("提示: Kimi Code 首次打开需在信任提示中选择 Trust; "
-          "Claude Code 需在项目内确认启用 MCP server。")
+    elif args.scope == "user":
+        print(f"\n已写入用户级配置,指向全局服务: {url}(先启动 smilex-memory serve)")
+    else:
+        print(f"\n指向全局服务: {url}(先启动 smilex-memory serve)")
+    for name in handled:
+        hint = _TOOL_HINTS.get(name)
+        if hint:
+            print(f"提示[{name}]: {hint}")
     return 0
 
 
@@ -285,14 +528,23 @@ def build_parser() -> argparse.ArgumentParser:
     p_mcp.add_argument("--db", help="数据库路径(默认配置文件值)")
     p_mcp.set_defaults(func=_cmd_mcp)
 
-    p_init = sub.add_parser("init", help="注入 MCP 配置到 Agent 工具的项目")
-    p_init.add_argument("project_dir", help="目标项目目录")
+    p_init = sub.add_parser(
+        "init", help="注入 MCP 配置到 Agent 工具(项目级 / 用户级全局)"
+    )
     p_init.add_argument(
-        "--tool", choices=[*ADAPTERS, "all"], default="all", help="目标工具(默认 all)"
+        "project_dir", nargs="?", help="目标项目目录(--scope user 时可省略)"
+    )
+    p_init.add_argument(
+        "--tool", nargs="+", choices=[*ADAPTERS, "all"], default=["all"],
+        help="目标工具(可多值,默认 all)",
     )
     p_init.add_argument("--url", help="MCP 服务地址(默认取配置 host:port)")
     p_init.add_argument(
         "--stdio", action="store_true", help="注入 stdio 本地库条目(默认 HTTP 全局服务)"
+    )
+    p_init.add_argument(
+        "--scope", choices=["project", "user"], default="project",
+        help="写入范围: 项目内配置 / 工具全局配置(默认 project)",
     )
     p_init.add_argument(
         "--guide", action="store_true", help="同时向 AGENTS.md/CLAUDE.md 追加使用约定"
