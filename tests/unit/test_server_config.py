@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from smilex.server.config import (
     ServerConfig,
     load_config,
@@ -54,3 +56,39 @@ def test_write_config_template(tmp_path):
     path.write_text("port = 1234\n", encoding="utf-8")
     write_config_template(path)
     assert load_config(path).port == 1234
+
+
+def test_load_from_yaml(tmp_path):
+    path = tmp_path / "config.yaml"
+    path.write_text(
+        "db_path: ~/custom/memory.db\n"
+        "port: 9001\n"
+        "host: 0.0.0.0\n"
+        "embedder: sentence-transformers\n",
+        encoding="utf-8",
+    )
+    config = load_config(path)
+    assert config.port == 9001
+    assert config.host == "0.0.0.0"
+    assert config.embedder == "sentence-transformers"
+
+
+def test_load_from_yml_suffix(tmp_path):
+    path = tmp_path / "config.yml"
+    path.write_text("port: 9002\n", encoding="utf-8")
+    assert load_config(path).port == 9002
+
+
+def test_cli_overrides_beat_yaml_file(tmp_path):
+    path = tmp_path / "config.yaml"
+    path.write_text("port: 9001\n", encoding="utf-8")
+    config = load_config(path, port=7778)
+    assert config.port == 7778
+
+
+def test_load_explicit_path_expands_home(tmp_path, monkeypatch):
+    fake_home = tmp_path / "home"
+    fake_home.mkdir()
+    (fake_home / "config.toml").write_text("port = 9101\n", encoding="utf-8")
+    monkeypatch.setenv("HOME", str(fake_home))
+    assert load_config(Path("~/config.toml")).port == 9101

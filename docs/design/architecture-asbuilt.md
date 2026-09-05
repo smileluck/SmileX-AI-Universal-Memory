@@ -1,6 +1,7 @@
 # SmileX Agent Memory — 现状架构总览(as-built)
 
-> **版本**: v2.1 · 2026-09-04
+> **版本**: v2.2 · 2026-09-04(结构重构: 大文件拆包、contracts 下沉、
+> benchmarks _shared 提公;全部公共导入路径经 shim/门面保留,见 §2 末尾约定)
 > **性质**: 本文描述**已实现的现状**;[agent-memory-design.md](agent-memory-design.md)
 > 与 [modules/](modules/) 系列是设计时文档(2026-06,部分选型已演进,
 > 如向量存储实际为 sqlite-vec 单轨而非 ChromaDB 双轨,阅读时以本文为准)。
@@ -68,8 +69,17 @@
 
 ```
 src/smilex/
-├── middlewares/          # 门面: MemoryMiddleware + DTO
+├── middlewares/          # 门面: memory.py(宿主: 构造/生命周期/会话/归档)
+│   ├── _write_path.py    #   M.3 写入 mixin(write/_write_relations/实体解析)
+│   ├── _recall_path.py   #   M.4 检索 mixin(recall/归档并入/scope 折算)
+│   ├── _bootstrap_facade.py  # M.2 冷启动门面 mixin(初始化/扫描导入/克隆)
+│   └── dto.py            #   纯 re-export shim → memory/contracts.py
 ├── memory/
+│   ├── contracts.py      # DTO 契约(WriteRequest/RecallRequest/...)— 2026-09
+│   │                     #   自 middlewares/dto.py 下沉,断开 bootstrap 反向依赖
+│   ├── embedder.py       # 基础设施客户端三件套(Protocol+默认实现+可选重后端,
+│   ├── reranker.py       #   无生命周期语义,2026-09 自 lifecycle/ 上移;
+│   ├── extractor.py      #   storage 层由此不再倒挂依赖 lifecycle)
 │   ├── models/           # L0 数据: fuzzy.py(FuzzyMemory/TimeRange/FuzzyLocation)
 │   │                     #       graph.py(Entity/Triple/CausalChain) scope.py enums.py
 │   │                     #       serialization.py(msgpack)
@@ -77,14 +87,24 @@ src/smilex/
 │   │   ├── queries/      #   temporal / graph / spatial / causal / fts / hybrid
 │   │   └── schema/       #   001..013 迁移 SQL,SCHEMA_VERSION=13
 │   ├── lifecycle/        # L2 生命周期: context_builder / promotion / l0_working_memory
-│   │                     #   / l0_snapshot / embedder / reranker / extractor / token_counter
-│   ├── scheduler/        # L3 调度: scheduler / triggers / tasks / checkpoint
+│   │                     #   / l0_snapshot / token_counter(embedder/reranker/extractor
+│   │                     #   旧路径留 shim)
+│   ├── scheduler/        # L3 调度: scheduler / triggers / checkpoint
+│   │   ├── tasks/        #   5 核心任务各一模块 + _common + __init__ 薄门面
 │   │   └── bootstrap/    #   冷启动: 向导/README解析/模板/种子/批量导入/克隆
+│   │       └── import_parsing.py  # 批量导入的纯解析函数(AST提取/git log解析/分块)
 │   ├── concurrency/      # L4 并发: lock_manager / conflict_detection / resolution / controller
 │   └── quality/          # L5 质量: contradiction / archiver / scope_promoter / quantization
+├── cli/                  # CLI 包: __init__(子命令) + adapters(工具适配器) + inject(配置注入)
 ├── server/               # 可选: mcp_server / api / app / config / panel/
 └── utils/                # ids(ULID) / timeutil(UTC ISO)
 ```
+
+分层规则由 `tests/unit/test_architecture.py` 守卫: `memory/**` 禁止 import
+`smilex.middlewares`(防 dto 循环复发);`memory/storage/**` 禁止 import
+`memory.lifecycle`;pyproject version 与 `smilex.__version__` 必须一致。
+旧公共路径(`middlewares.dto` / `memory.lifecycle.embedder` 等)全部保留为
+纯 re-export shim,零 API 破坏。
 
 ## 3. 公开 API(middlewares)
 
@@ -114,7 +134,7 @@ MemoryMiddleware(
 | `archive_expired(policy, scope)` / `restore_archived(...)`                                | 归档与恢复                                                                   |
 | `close_session(session_id, persist=True)` / `restore_session(...)`                        | L0 快照落盘(007/009 表)/ 恢复                                                  |
 
-关键 DTO(`middlewares/dto.py`):
+关键 DTO(`memory/contracts.py`;`middlewares/dto.py` 为兼容 shim):
 
 - `WriteRequest(content, entities, relations: list[TripleInput], importance∈[0,1],
   time_range, location, scope, emotion_weight, expires_at)` — importance
@@ -214,7 +234,9 @@ schema < 13 的老库 `fts_fragments` 不存在时 `OperationalError` 捕获 →
 
 三者同构设计——默认零依赖实现 + 可选强实现,core 永不强制引入
 LLM 或重模型;均有 `Config` dataclass + `get_xxx()` 工厂
-(`EmbedderConfig`/`RerankerConfig`/`ExtractorConfig`):
+(`EmbedderConfig`/`RerankerConfig`/`ExtractorConfig`)。三者位于
+`memory/{embedder,reranker,extractor}.py`(`memory/lifecycle/` 下旧路径
+为 shim):
 
 | Protocol                                           | 默认(零依赖)                                  | 可选增强                                                                                                               | extra         |
 | -------------------------------------------------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | ------------- |
@@ -276,8 +298,9 @@ cache 64MB / foreign\_keys / busy\_timeout 5000ms);迁移按
 主动让出,进度+步号+游标存 checkpoints 表,msgpack 编码)/
 PRIORITY\_INHERITANCE;`resume` 从断点续跑。
 
-5 个核心任务(`tasks.py` `CoreTaskRunner`,`register_core_tasks`
-配默认触发器):
+5 个核心任务(`scheduler/tasks/` 包: consolidate/forget/summarize/causal/
+semantic 各一模块 + `_common.py` 共享子句,`__init__.py` 的 `CoreTaskRunner`
+为薄门面;`register_core_tasks` 配默认触发器):
 
 | 任务          | 行为                                                                                                    | 关键参数                              |
 | ----------- | ----------------------------------------------------------------------------------------------------- | --------------------------------- |
@@ -290,7 +313,8 @@ PRIORITY\_INHERITANCE;`resume` 从断点续跑。
 `bootstrap/` 子包(冷启动):向导问答(`project_bootstrap` +
 `onboarding`,同名项目按 entity_id 复用既有 scope)、README 解析
 (`readme_parser`)、项目模板(`templates/{agent,cli,data,web}.yaml`)、
-种子注入(`seeds/seed_injector`)、批量导入(`bulk_importer`,Git/Markdown/
+种子注入(`seeds/seed_injector`)、批量导入(`bulk_importer` 编排 +
+`import_parsing` 纯解析函数,Git/Markdown/
 源码/文本;markdown 与源码目录扫描跳过 node_modules/.venv 等依赖与构建
 目录,`max_files` 截断;源码通道 `.py` 走 AST——模块 docstring/顶层
 类与函数/内外部依赖(标准库过滤,绝对导入按本目录/src 布局/仓库根
@@ -347,7 +371,8 @@ token_budget=4000 / enable_scheduler=true`,CLI 可覆盖 db/host/port):
 - **REST**(`api.py`):`GET /stats` `/memories` `/memory/{id}`
   `/tasks` + `POST /recall-test`
 - **Web 面板**:只读静态页(概览统计/记忆浏览/召回测试),写入统一走 MCP
-- **CLI**(`cli.py` → `smilex-memory`):`serve` / `mcp` / `init`
+- **CLI**(`cli/` 包 → `smilex-memory`,入口点 `smilex.cli:main`):
+  `serve` / `mcp` / `init`
   (向 Kimi Code / Claude Code 注入工具配置 + 记忆使用约定;`--scan`
   时经 `bootstrap_project` 冷启动并扫描 README/git/markdown/源码生成
   初始记忆,stdio 模式写项目内库、HTTP 模式直写全局库) / `doctor`;
@@ -519,6 +544,16 @@ token_budget=4000 / enable_scheduler=true`,CLI 可覆盖 db/host/port):
 | Web 面板 | 只读管理页(概览/浏览/召回测试);写入统一走 MCP 工具 |
 | config.toml | `~/.smilex/config.toml`,服务化配置(db/embedder/reranker/fact_extractor 等) |
 | doctor | CLI 环境自检命令 |
+
+### 代码结构与兼容
+
+| 名词 | 解释 |
+|---|---|
+| contracts | `memory/contracts.py` 的 DTO 契约层(WriteRequest/RecallRequest 等 13 符号);2026-09 自 middlewares/dto.py 下沉,使 bootstrap 不再反向依赖 middlewares |
+| shim(纯 re-export 垫片) | 保留旧公共导入路径的兼容模块,内容只有 `from 新位置 import *` + `__all__`;调用方零改动,未来大版本可移除 |
+| mixin 拆分 | 把大类按职责拆成多个 mixin 组合回原类(`MemoryMiddleware` = 宿主 + 写入/检索/冷启动三 mixin);方法体不变,模块路径与类名不变 |
+| 守卫测试 | `tests/unit/test_architecture.py`:AST 扫描断言依赖方向(memory 不进 middlewares、storage 不进 lifecycle)+ 版本一致性,防架构腐化回归 |
+| benchmarks _shared | locomo/longmemeval/mem0_compat 共用的 LLM 接入件(llm_client/judge/answer);各脚本头部一行 sys.path 引导后 `from _shared.xxx import` |
 
 ### Benchmark 术语
 

@@ -29,23 +29,28 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+import mem0_prompts as mp
+from common import (
+    DEFAULT_CUTOFFS,
+    TOP_K,
+    compute_metrics_by_cutoff,
+    format_memories_chronological,
+    load_fragment_rows,
+    ranked_memories,
+    render_report,
+    reopen_stdout,
+    save_results,
+)
+
 from smilex.memory.lifecycle.embedder import EmbedderConfig, get_embedder
 from smilex.memory.models import MemoryScope
 from smilex.memory.models.fuzzy import TimeRange
 from smilex.middlewares import MemoryMiddleware, RecallRequest, WriteRequest
 
-import mem0_prompts as mp
-from common import (
-    DEFAULT_CUTOFFS, TOP_K, compute_metrics_by_cutoff, format_memories_chronological,
-    import_from, load_fragment_rows, load_llm_client, ranked_memories, reopen_stdout,
-    render_report, save_results,
-)
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-_locomo_ingest = import_from(
-    Path(__file__).parent.parent / "locomo" / "ingest.py", "m0c_locomo_ingest"
-)
-iter_sessions = _locomo_ingest.iter_sessions
-chunk_session = _locomo_ingest.chunk_session
+import _shared.llm_client as _llm  # noqa: E402
+from locomo.ingest import chunk_session, iter_sessions  # noqa: E402
 
 RESULTS_DIR = Path(__file__).parent / "results"
 
@@ -140,9 +145,6 @@ async def answer_and_judge(
     return {"answer": answer, "correct": correct, "label": label}
 
 
-_llm = None  # 延迟绑定的 llm_client 模块
-
-
 async def _chat_answer(client, prompt: str) -> tuple[str, int]:
     return await _llm.chat(
         client, _llm.answer_model(), "", prompt, max_tokens=4096
@@ -157,9 +159,6 @@ async def _chat_judge(client, system: str, prompt: str) -> tuple[str, int]:
 
 
 async def run(args: argparse.Namespace) -> int:
-    global _llm
-    _llm = load_llm_client()
-
     if args.device:
         from smilex.memory.lifecycle.embedder import SentenceTransformerEmbedder
         embedder = SentenceTransformerEmbedder(device=args.device)

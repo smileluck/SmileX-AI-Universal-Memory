@@ -1,19 +1,19 @@
 """Layer 2: 生命周期 — L0 cachebox / L1 向量 / L2 SQLite / L3 图谱."""
 
-from .context_builder import (
-    DEFAULT_TOKEN_BUDGET,
-    SAFETY_MARGIN,
-    BuiltContext,
-    ContextBuilder,
-    ContextSource,
-)
-from .embedder import (
+from ..embedder import (
     EMBEDDING_DIM,
     Embedder,
     EmbedderConfig,
     HashEmbedder,
     SentenceTransformerEmbedder,
     get_embedder,
+)
+from .context_builder import (
+    DEFAULT_TOKEN_BUDGET,
+    SAFETY_MARGIN,
+    BuiltContext,
+    ContextBuilder,
+    ContextSource,
 )
 from .l0_snapshot import L0SnapshotStore
 from .l0_working_memory import L0WorkingMemory

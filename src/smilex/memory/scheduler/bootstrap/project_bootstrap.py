@@ -14,13 +14,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from ....middlewares.dto import (
+from ....utils.ids import generate_id
+from ...contracts import (
     PROJECT_TEMPLATES,
     BootstrapStage,
     ProjectContext,
     ProjectInitRequest,
 )
-from ....utils.ids import generate_id
 from ...models import Entity, MemoryScope, Triple
 from ...storage.storage_engine import StorageEngine, parse_scope_path
 from .active_learner import ActiveLearner, LLMProvider

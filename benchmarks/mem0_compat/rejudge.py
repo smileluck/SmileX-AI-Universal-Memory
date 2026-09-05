@@ -20,15 +20,15 @@ import sys
 from pathlib import Path
 
 import mem0_prompts as mp
-from common import import_from
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+import _shared.llm_client as _llm  # noqa: E402
 
 RESULTS_DIR = Path(__file__).parent / "results"
 
 
 async def rejudge(path: Path, *, all_entries: bool, dry_run: bool) -> int:
-    _llm = import_from(
-        Path(__file__).parent.parent / "longmemeval" / "llm_client.py", "llm_client"
-    )
     client = _llm.get_client()
 
     data = json.loads(path.read_text(encoding="utf-8"))

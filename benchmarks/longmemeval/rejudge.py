@@ -14,10 +14,10 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from judge import judge_answer
-from llm_client import get_client
+from _shared.judge import judge_answer  # noqa: E402
+from _shared.llm_client import get_client  # noqa: E402
 
 CKPT = Path(__file__).parent / "results" / "ckpt_longmemeval_s_test_sentence-transformers.jsonl"
 

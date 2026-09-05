@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # SmileX Memory 常驻服务注册(Linux systemd --user)
 # 用法: ./register-service-linux.sh [--uninstall]
+# 可选: SMILEX_SERVE_ARGS="--config ~/.smilex/config.yaml --port 9000" ./register-service-linux.sh
 set -euo pipefail
 
 UNIT_NAME="smilex-memory.service"
@@ -28,7 +29,7 @@ Description=SmileX Agent Memory Server (MCP + panel)
 After=default.target
 
 [Service]
-ExecStart=$EXE serve
+ExecStart=$EXE serve ${SMILEX_SERVE_ARGS:-}
 Restart=on-failure
 RestartSec=5
 

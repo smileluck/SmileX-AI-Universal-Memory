@@ -6,10 +6,10 @@ import asyncio
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-import llm_client
-import run_benchmark
+import _shared.llm_client as llm_client  # noqa: E402
+import run_benchmark  # noqa: E402
 
 
 class _Msg:

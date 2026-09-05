@@ -25,13 +25,16 @@ from collections import defaultdict
 from pathlib import Path
 from statistics import median
 
-from smilex.memory.lifecycle.embedder import EmbedderConfig, get_embedder
-
-from answer import answer_question
 from download_dataset import dataset_path
 from ingest import ingest_sample
-from judge import judge_answer
-from llm_client import get_client
+
+from smilex.memory.lifecycle.embedder import EmbedderConfig, get_embedder
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from _shared.answer import answer_question  # noqa: E402
+from _shared.judge import judge_answer  # noqa: E402
+from _shared.llm_client import get_client  # noqa: E402
 
 RESULTS_DIR = Path(__file__).parent / "results"
 

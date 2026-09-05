@@ -29,13 +29,16 @@ from collections import defaultdict
 from pathlib import Path
 from statistics import median
 
-from smilex.memory.lifecycle.embedder import EmbedderConfig, get_embedder
-
-from answer import answer_question
 from download_dataset import dataset_path
 from ingest import ingest_conversation
-from judge import judge_answer
-from llm_client import get_client
+
+from smilex.memory.lifecycle.embedder import EmbedderConfig, get_embedder
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from _shared.answer import answer_question  # noqa: E402
+from _shared.judge import judge_answer  # noqa: E402
+from _shared.llm_client import get_client  # noqa: E402
 
 RESULTS_DIR = Path(__file__).parent / "results"
 
@@ -121,11 +124,8 @@ async def run(args: argparse.Namespace) -> int:
                     question = qa["question"]
                     cat = qa.get("category", 0)
                     cat_name = CATEGORY_NAMES.get(cat, f"cat_{cat}")
-                    if cat == 5:
-                        # adversarial: 对话中不可回答,拒答("I don't know.")才得分
-                        gold = "I don't know."
-                    else:
-                        gold = qa["answer"]
+                    # adversarial: 对话中不可回答,拒答("I don't know.")才得分
+                    gold = "I don't know." if cat == 5 else qa["answer"]
 
                     try:
                         if mw is None:  # 该对话首次作答 → 灌入一次
@@ -177,7 +177,9 @@ async def run(args: argparse.Namespace) -> int:
                         f"ctx={context_tokens}tok recall={recall_s:.2f}s"
                     )
                     if args.dump_context:
-                        print(f"    --- context ---\n{result.get('context', '')}\n    ---------------")
+                        print("    --- context ---")
+                        print(result.get("context", ""))
+                        print("    ---------------")
             finally:
                 if mw is not None:
                     await mw.close()
@@ -213,7 +215,8 @@ def write_report(
     ]
     for cat_name in sorted(by_cat):
         flags = by_cat[cat_name]
-        lines.append(f"  {cat_name:<16} {sum(flags)}/{len(flags)} = {sum(flags)/len(flags)*100:.1f} %")
+        acc = sum(flags) / len(flags) * 100
+        lines.append(f"  {cat_name:<16} {sum(flags)}/{len(flags)} = {acc:.1f} %")
     lines += [
         f"Avg Context Tokens {avg_ctx / 1000:.1f} K",
         f"Recall Latency p50 {p50:.2f} s",

@@ -98,6 +98,10 @@ target-version = "py311"
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "UP", "B", "SIM"]
 
+[tool.ruff.lint.per-file-ignores]
+# benchmark 判卷/抽取 prompt 的长文本行,重排无意义
+"benchmarks/mem0_compat/mem0_prompts.py" = ["E501"]
+
 [tool.mypy]
 python_version = "3.11"
 strict = true

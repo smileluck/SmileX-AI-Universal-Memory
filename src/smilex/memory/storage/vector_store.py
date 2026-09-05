@@ -29,7 +29,7 @@ from sqlite_vec import serialize_float32
 
 from ...utils.ids import generate_id
 from ...utils.timeutil import now_utc, to_iso
-from ..lifecycle.embedder import Embedder, get_embedder
+from ..embedder import Embedder, get_embedder
 from .queries._scope import build_scope_clause
 
 if TYPE_CHECKING:

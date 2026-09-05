@@ -6,7 +6,6 @@ mem0 协议核心: 一次检索 top-200,在 10/20/50/200 四个截断点各评�
 
 from __future__ import annotations
 
-import asyncio
 import json
 import random
 import sqlite3
@@ -14,23 +13,8 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
-BENCH_DIR = Path(__file__).parent.parent
 DEFAULT_CUTOFFS = [10, 20, 50, 200]
 TOP_K = 200  # 检索深度(与 mem0 --top-k 200 一致)
-
-
-def import_from(path: Path, name: str):
-    """从指定文件加载模块(各 benchmark 目录同名模块多,不能共用 sys.path)."""
-    import importlib.util
-    spec = importlib.util.spec_from_file_location(name, path)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
-
-
-def load_llm_client():
-    """复用 longmemeval 的 llm_client(GLM 兼容 / SMILEX_BENCH_* 环境变量)."""
-    return import_from(BENCH_DIR / "longmemeval" / "llm_client.py", "m0c_llm_client")
 
 
 # ---------- db 全文读取(MemoryRef.snippet 截断 120 字符不够作答) ----------

@@ -30,22 +30,29 @@ import urllib.request
 from datetime import datetime
 from pathlib import Path
 
+import mem0_prompts as mp
+from common import (
+    DEFAULT_CUTOFFS,
+    TOP_K,
+    compute_metrics_by_cutoff,
+    format_memories_grouped_by_date,
+    load_fragment_rows,
+    ranked_memories,
+    render_report,
+    reopen_stdout,
+    sample_questions_stratified,
+    save_results,
+)
+
 from smilex.memory.lifecycle.embedder import EmbedderConfig, get_embedder
 from smilex.memory.models import MemoryScope
 from smilex.memory.models.fuzzy import TimeRange
 from smilex.middlewares import MemoryMiddleware, RecallRequest, WriteRequest
 
-import mem0_prompts as mp
-from common import (
-    DEFAULT_CUTOFFS, TOP_K, compute_metrics_by_cutoff, format_memories_grouped_by_date,
-    import_from, load_fragment_rows, load_llm_client, ranked_memories,
-    reopen_stdout, render_report, sample_questions_stratified, save_results,
-)
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-_lme_ingest = import_from(
-    Path(__file__).parent.parent / "longmemeval" / "ingest.py", "m0c_lme_ingest"
-)
-chunk_session = _lme_ingest.chunk_session
+import _shared.llm_client as _llm  # noqa: E402
+from longmemeval.ingest import chunk_session  # noqa: E402
 
 RESULTS_DIR = Path(__file__).parent / "results"
 DATA_DIR = Path(__file__).parent / "data"
@@ -67,7 +74,10 @@ def load_samples(source: str) -> list[dict]:
     if not path.exists():
         # original 可复用 longmemeval benchmark 已下载的缓存
         if source == "original":
-            shared = Path(__file__).parent.parent / "longmemeval" / "data" / "longmemeval_s_test.jsonl"
+            shared = (
+                Path(__file__).parent.parent
+                / "longmemeval" / "data" / "longmemeval_s_test.jsonl"
+            )
             if shared.exists():
                 return [json.loads(line) for line in shared.open(encoding="utf-8")]
         url = CLEANED_URL if source == "cleaned" else ORIGINAL_URL
@@ -142,9 +152,6 @@ async def ingest_sample(
     return mw
 
 
-_llm = None
-
-
 async def _chat_answer(client, prompt: str) -> str:
     text, _ = await _llm.chat(client, _llm.answer_model(), "", prompt, max_tokens=4096)
     return text
@@ -175,9 +182,6 @@ async def _chat_judge(client, prompt: str) -> str:
 
 
 async def run(args: argparse.Namespace) -> int:
-    global _llm
-    _llm = load_llm_client()
-
     if args.device:
         from smilex.memory.lifecycle.embedder import SentenceTransformerEmbedder
         embedder = SentenceTransformerEmbedder(device=args.device)
@@ -191,7 +195,8 @@ async def run(args: argparse.Namespace) -> int:
     else:
         samples = sample_questions_stratified(all_samples, args.per_type, args.seed)
     cutoffs = [int(x) for x in args.cutoffs.split(",")]
-    print(f"样本数: {len(samples)}(source={args.source}, seed={args.seed if not args.all_questions else '-'})")
+    seed_tag = "-" if args.all_questions else args.seed
+    print(f"样本数: {len(samples)}(source={args.source}, seed={seed_tag})")
 
     variant = ("_fx" if args.fact_extraction else "") + ("_rr" if args.rerank else "")
     ckpt_path = RESULTS_DIR / f"ckpt_lme_mem0compat_{args.source}_{args.embedder}{variant}.jsonl"

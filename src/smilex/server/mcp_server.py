@@ -21,10 +21,10 @@ import json
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from ..memory.lifecycle.embedder import EmbedderConfig, get_embedder
-from ..memory.lifecycle.extractor import ExtractorConfig, get_extractor
-from ..memory.lifecycle.reranker import RerankerConfig, get_reranker
+from ..memory.embedder import EmbedderConfig, get_embedder
+from ..memory.extractor import ExtractorConfig, get_extractor
 from ..memory.models import MemoryScope, ScopeFilter
+from ..memory.reranker import RerankerConfig, get_reranker
 from ..middlewares.dto import (
     RecallRequest,
     TripleInput,

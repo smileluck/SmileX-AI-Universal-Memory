@@ -33,9 +33,9 @@ from .token_counter import TokenCounter
 
 if TYPE_CHECKING:
     from ..models import ScopeFilter
+    from ..reranker import Reranker
     from ..storage.vector_store import VectorStore
     from .l0_working_memory import L0WorkingMemory
-    from .reranker import Reranker
 
 # 主文档 §7.4: 总预算 4000 tokens
 DEFAULT_TOKEN_BUDGET = 4000
@@ -153,7 +153,7 @@ class ContextBuilder:
         safety_margin: float = SAFETY_MARGIN,
         reranker: Reranker | None = None,
     ) -> None:
-        from .reranker import NoopReranker
+        from ..reranker import NoopReranker
 
         self._l0 = l0
         self._vector_store = vector_store
@@ -218,7 +218,7 @@ class ContextBuilder:
         - 精排分数 min-max 归一化到 [0,1] 替换原 RRF 分数,层优先级不变
         - query_text 为空(纯 L0/L2 实体检索)或精排异常时不干预(降级)
         """
-        from .reranker import NoopReranker
+        from ..reranker import NoopReranker
 
         if query_text is None or isinstance(self._reranker, NoopReranker):
             return candidates

@@ -38,3 +38,8 @@ benchmarks/longmemeval/results/
 
 # mem0_compat 数据集缓存(245MB,下载脚本可重建)
 benchmarks/mem0_compat/data/longmemeval_s_cleaned.jsonl
+
+# benchmark 断点续传 checkpoint(运行产物,可由 --resume 重建)
+benchmarks/*/results/ckpt_*.jsonl
+# locomo 数据集(download_dataset.py 可重下)
+benchmarks/locomo/data/

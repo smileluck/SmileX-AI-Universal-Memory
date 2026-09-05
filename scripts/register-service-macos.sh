@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # SmileX Memory 常驻服务注册(macOS launchd)
 # 用法: ./register-service-macos.sh [--uninstall]
+# 可选: SMILEX_SERVE_ARGS="--config ~/.smilex/config.yaml --port 9000" ./register-service-macos.sh
 set -euo pipefail
 
 LABEL="com.smilex.memory"
@@ -19,6 +20,11 @@ if [[ -z "$EXE" ]]; then
     exit 1
 fi
 
+EXTRA_PLIST=""
+for arg in ${SMILEX_SERVE_ARGS:-}; do
+    EXTRA_PLIST+="<string>$arg</string>"
+done
+
 mkdir -p "$HOME/Library/LaunchAgents"
 cat > "$PLIST" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -28,7 +34,7 @@ cat > "$PLIST" <<EOF
 <dict>
     <key>Label</key><string>$LABEL</string>
     <key>ProgramArguments</key>
-    <array><string>$EXE</string><string>serve</string></array>
+    <array><string>$EXE</string><string>serve</string>$EXTRA_PLIST</array>
     <key>RunAtLoad</key><true/>
     <key>KeepAlive</key><true/>
     <key>StandardOutPath</key><string>$HOME/.smilex/serve.log</string>

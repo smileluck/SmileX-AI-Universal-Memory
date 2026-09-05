@@ -35,20 +35,10 @@ from smilex.middlewares import MemoryMiddleware, RecallRequest, WriteRequest
 
 BENCH_DIR = Path(__file__).parent.parent
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-def _import_from(path: Path, name: str):
-    """从指定文件加载模块(两个 benchmark 目录各有同名 ingest.py,不能共用 sys.path)."""
-    import importlib.util
-    spec = importlib.util.spec_from_file_location(name, path)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
-
-
-_lme_ingest = _import_from(BENCH_DIR / "longmemeval" / "ingest.py", "lme_ingest")
-_locomo_ingest = _import_from(BENCH_DIR / "locomo" / "ingest.py", "locomo_ingest")
-chunk_session_lme = _lme_ingest.chunk_session
-iter_sessions = _locomo_ingest.iter_sessions
+from locomo.ingest import iter_sessions  # noqa: E402
+from longmemeval.ingest import chunk_session as chunk_session_lme  # noqa: E402
 
 RESULTS_DIR = Path(__file__).parent / "results"
 LOCOMO_CATEGORIES = {1: "multi_hop", 2: "temporal", 3: "open_domain", 4: "single_hop"}

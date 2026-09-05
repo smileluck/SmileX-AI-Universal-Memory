@@ -72,8 +72,8 @@ def create_app(config: ServerConfig) -> FastAPI:
     return app
 
 
-async def serve(config: ServerConfig) -> None:
-    """启动 uvicorn(smilex-memory serve)."""
+async def serve(config: ServerConfig, log_level: str = "info") -> None:
+    """启动 uvicorn(smilex-memory serve / start)."""
     try:
         import uvicorn
     except ImportError as e:
@@ -82,6 +82,6 @@ async def serve(config: ServerConfig) -> None:
         ) from e
     app = create_app(config)
     server = uvicorn.Server(
-        uvicorn.Config(app, host=config.host, port=config.port, log_level="info")
+        uvicorn.Config(app, host=config.host, port=config.port, log_level=log_level)
     )
     await server.serve()

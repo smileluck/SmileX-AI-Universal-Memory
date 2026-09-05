@@ -81,8 +81,19 @@ ZCode / Trae 一键注入配置,WorkBuddy 输出手动接入指引(MCP 由其客
 # 安装(核心库零新依赖,server 相关依赖按需装)
 pip install 'smilex-ai-memory[server]'
 
+# 后台静默运行(推荐) — 脱离终端,pidfile 管理,日志 ~/.smilex/logs/serve-{端口}.log
+smilex-memory start          # 默认 127.0.0.1:8765;重复执行幂等
+smilex-memory status         # 查看运行状态(pid / 健康 / 日志;退出码 0=运行中)
+smilex-memory stop           # 优雅停止(SIGTERM → 超时 SIGKILL,--force 直接强杀)
+
+# 自定义端口 / 配置文件(.toml 与 .yaml 均可,CLI 旗标 > 配置文件 > 默认值)
+smilex-memory start --port 9000 --config ~/.smilex/config.yaml
+smilex-memory status --port 9000 && smilex-memory stop --port 9000   # 多实例按端口隔离
+
+# 前台运行(调试用) — serve 与 start 接受相同旗标,另有 --log-level debug|info|warning|error
+smilex-memory serve --port 9000
+
 # 方式一: 全局常驻(推荐) — 单库 ~/.smilex/memory.db,scope 隔离多项目
-smilex-memory serve          # MCP: http://127.0.0.1:8765/mcp,面板: http://127.0.0.1:8765/
 smilex-memory init <项目目录> --guide   # 一键注入 MCP 配置 + 记忆使用约定
 
 # 方式二: 项目级 stdio — 独立库 <项目>/.smilex/memory.db
@@ -102,11 +113,12 @@ smilex-memory init <项目目录> --stdio --scan
 # agent 侧等价: MCP 工具 memory_init_project(name, project_path="<项目根>")
 # (stdio 模式 project_path 可省略,自动按 db 路径推断项目根)
 
-# 环境自检
+# 环境自检(配置 / db / extras / 服务状态)
 smilex-memory doctor
 ```
 
-常驻自启动注册脚本(登录后自动 `smilex-memory serve`):
+常驻自启动注册脚本(登录后自动 `smilex-memory serve`,支持
+`SMILEX_SERVE_ARGS="--config ~/.smilex/config.yaml --port 9000"` 传参):
 
 - Windows: `powershell -File scripts/register-service-windows.ps1`(`-Unregister` 卸载)
 - Linux: `scripts/register-service-linux.sh`(`--uninstall` 卸载,systemd --user)

@@ -2,6 +2,8 @@
 
 配置文件: ``~/.smilex/config.toml``(不存在时 load 返回默认值,
 ``smilex-memory serve`` 首次运行自动生成模板)。CLI 参数优先级最高。
+``--config`` 可指定任意路径,按扩展名识别格式: ``.toml``(tomllib)或
+``.yaml``/``.yml``(yaml.safe_load,PyYAML 已是核心依赖)。
 
 示例 config.toml::
 
@@ -13,6 +15,12 @@
     fact_extractor = "passthrough"  # 或 "llm"(需 [llm] extras + SMILEX_EXTRACT_* 环境变量)
     token_budget = 4000
     enable_scheduler = true      # serve 进程内跑 5 类核心调度任务
+
+等价 config.yaml(扁平键,字段名相同)::
+
+    db_path: ~/.smilex/memory.db
+    host: 127.0.0.1
+    port: 8765
 """
 
 from __future__ import annotations
@@ -26,6 +34,7 @@ SMILEX_HOME = Path.home() / ".smilex"
 DEFAULT_CONFIG_PATH = SMILEX_HOME / "config.toml"
 DEFAULT_DB_PATH = SMILEX_HOME / "memory.db"
 DEFAULT_MCP_URL_PATH = "/mcp"
+DEFAULT_PORT = 8765
 
 
 class ServerConfig(BaseModel):
@@ -33,7 +42,7 @@ class ServerConfig(BaseModel):
 
     db_path: Path = DEFAULT_DB_PATH
     host: str = "127.0.0.1"
-    port: int = Field(default=8765, ge=1, le=65535)
+    port: int = Field(default=DEFAULT_PORT, ge=1, le=65535)
     embedder: str = "hash"  # hash | sentence-transformers
     reranker: str = "noop"  # noop | cross-encoder(需 [rerank] extras)
     # passthrough | llm(需 [llm] extras + SMILEX_EXTRACT_* 环境变量)
@@ -58,16 +67,22 @@ def load_config(
     host: str | None = None,
     port: int | None = None,
 ) -> ServerConfig:
-    """加载配置: TOML 文件 → CLI 覆盖(优先级递增).
+    """加载配置: TOML/YAML 文件 → CLI 覆盖(优先级递增).
 
     Args:
-        path: 配置文件路径(None 用默认 ~/.smilex/config.toml;不存在视为空)
+        path: 配置文件路径(None 用默认 ~/.smilex/config.toml;不存在视为空);
+            按 ``.yaml``/``.yml`` 后缀走 YAML,其余走 TOML
         db_path / host / port: CLI 覆盖项(非 None 时生效)
     """
-    path = path or DEFAULT_CONFIG_PATH
+    path = (path or DEFAULT_CONFIG_PATH).expanduser()
     data: dict = {}
     if path.exists():
-        data = tomllib.loads(path.read_text(encoding="utf-8"))
+        if path.suffix.lower() in (".yaml", ".yml"):
+            import yaml
+
+            data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        else:
+            data = tomllib.loads(path.read_text(encoding="utf-8"))
     config = ServerConfig(**data)
     overrides = {
         k: v for k, v in {"db_path": db_path, "host": host, "port": port}.items()
@@ -80,7 +95,7 @@ def load_config(
 
 def write_config_template(path: Path | None = None) -> Path:
     """生成默认配置模板(已存在则不动),返回路径."""
-    path = path or DEFAULT_CONFIG_PATH
+    path = (path or DEFAULT_CONFIG_PATH).expanduser()
     if path.exists():
         return path
     path.parent.mkdir(parents=True, exist_ok=True)

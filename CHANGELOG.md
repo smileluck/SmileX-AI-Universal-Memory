@@ -6,7 +6,56 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **项目结构重构(零 API 破坏,全部公共导入路径经 shim/门面保留)**:
+  - `middlewares/dto.py` 内容下沉为 `memory/contracts.py`(它只依赖
+    models+utils,本属契约层),旧路径变纯 re-export shim;断开
+    `scheduler/bootstrap → middlewares` 反向依赖,循环依赖不复存在
+  - `memory/lifecycle/{embedder,reranker,extractor}.py` 上移为
+    `memory/{embedder,reranker,extractor}.py`(基础设施客户端无生命周期
+    语义);修复 `storage → lifecycle` 倒挂边,旧路径留 shim
+  - 四个大文件拆分(方法体不变,模块路径与类名不变):
+    `scheduler/tasks.py` → `tasks/` 包(5 任务模块 + `_common`);
+    `bulk_importer.py` 纯解析函数 → `bootstrap/import_parsing.py`;
+    `middlewares/memory.py`(915 行)→ 宿主 + `_write_path`/`_recall_path`/
+    `_bootstrap_facade` 三个 mixin(242 行);
+    `cli.py` → `cli/` 包(`adapters`/`inject` + 子命令,入口点不变)
+  - benchmarks: locomo/longmemeval 逐字节相同的 `llm_client/judge/answer`
+    提公为 `benchmarks/_shared/`;mem0_compat 与 retrieval_baseline 的
+    importlib 文件加载 hack 改为标准包导入;README 全部调用方式不变
+
 ### Added
+
+- **后台静默运行 + 端口指定 + 指定配置文件启动**:
+  - 新增 `smilex-memory start / stop / status` 三件套(`server/daemon.py`,
+    全 stdlib 零新增依赖): start 后台脱离终端(POSIX `start_new_session` /
+    Windows `DETACHED_PROCESS`),pidfile `~/.smilex/serve-{端口}.pid`、日志
+    `~/.smilex/logs/serve-{端口}.log` 按端口隔离多实例;轮询 `/api/health`
+    确认就绪(30s 预算兼容嵌入模型慢加载),子进程早夭打印日志尾部;
+    stop 走 SIGTERM 优雅退出 → 10s 超时 SIGKILL 兜底(`--force` 直接强杀);
+    重复 start 幂等,stale pidfile 自动清理;`cli/__main__.py` 支持
+    `python -m smilex.cli` 再执行
+  - 全子命令新增 `--config <路径>` 指定配置文件,`.toml` 与 `.yaml/.yml`
+    均可(按扩展名识别,PyYAML 已是核心依赖);显式路径不存在时报错退出
+  - `serve`/`start` 新增 `--log-level debug|info|warning|error`(透传 uvicorn),
+    `start` 另支持 `--log-file`;`doctor` 输出服务状态行(daemon 运行中/
+    非 daemon 启动/未运行)
+  - 常驻注册脚本支持 `SMILEX_SERVE_ARGS` 环境变量向 `serve` 传参
+    (如 `--config ~/.smilex/config.yaml --port 9000`)
+- 结构守卫测试(`tests/unit/test_architecture.py`): AST 断言
+  `memory/**` 不 import `smilex.middlewares`、`storage/**` 不 import
+  `memory.lifecycle`、pyproject version == `smilex.__version__`
+- benchmarks 纳入 ruff CI(`mem0_prompts.py` 的 prompt 长文本行豁免 E501)
+
+### Chore
+
+- `__version__` 0.1.0 → 0.1.2 对齐 pyproject(由守卫测试防再漂移)
+- git 产物清理: mem0_compat 7 个 ckpt(可 `--resume` 重建)与
+  locomo 数据集 jsonl(download_dataset.py 可重下)移出版本库,
+  补 .gitignore 规则;人工报告 md/json 保留
+
+### Added(待发布功能的既有条目)
 
 - **初始化扫描新增源码通道**: `memory_init_project` / `init --scan` /
   `bootstrap_project(scan_code=True)` 扫描项目源码结构生成初始记忆——
