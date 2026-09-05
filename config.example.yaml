@@ -1,0 +1,60 @@
+# ============================================================
+# SmileX-AI-Memory 服务配置示例
+# ============================================================
+# 用法(--config 对 start / serve / mcp / init / doctor 均生效):
+#   smilex-memory start --config config.yaml     # 后台静默运行
+#   smilex-memory serve --config config.yaml     # 前台运行(调试)
+#   smilex-memory status --config config.yaml    # 查看状态(stop 同理)
+#
+# 格式: .toml 与 .yaml/.yml 均可(按扩展名识别,字段名完全相同)
+# 优先级: CLI 旗标(--port/--host/--db) > 本文件 > 内置默认值
+# 默认路径: ~/.smilex/config.toml(首次 serve 时自动生成精简模板)
+# 多实例: 各用不同端口即可(pidfile / 日志按端口隔离,互不干扰)
+# 路径字段支持 ~ 展开;未知字段被忽略
+
+# ---------- 服务 ----------
+
+# SQLite 数据库路径(目录不存在时自动创建;全局模式多项目共用单库,scope 隔离)
+db_path: ~/.smilex/memory.db
+
+# 监听地址: 127.0.0.1 仅本机访问(推荐);0.0.0.0 监听所有网卡(注意暴露风险)
+host: 127.0.0.1
+
+# 监听端口(1-65535);CLI --port 可临时覆盖
+port: 8765
+
+# ---------- 检索质量(可选,按需装 extras) ----------
+
+# 嵌入器(向量检索的向量化来源):
+#   hash                  零依赖纯本地哈希(默认,开箱即用)
+#   sentence-transformers 语义检索,显著提升召回质量
+#                         (需 pip install 'smilex-ai-memory[embedding]',
+#                          首次启动需下载模型,启动较慢)
+embedder: hash
+
+# 重排序器(多路召回后的精排):
+#   noop          不重排(默认)
+#   cross-encoder 交叉编码器精排(需 [rerank] extras)
+reranker: noop
+
+# 事实抽取(写入路径的预处理):
+#   passthrough  原文直接入库(默认)
+#   llm          写入时用 LLM 抽取结构化事实,显著提升问答类召回
+#                (需 [llm] extras + 下方 SMILEX_EXTRACT_* 环境变量)
+fact_extractor: passthrough
+
+# 召回 token 预算(memory_recall 按此裁剪返回内容,防上下文超载)
+token_budget: 4000
+
+# ---------- 调度 ----------
+
+# serve 进程内是否跑 5 类核心调度任务
+# (遗忘衰减 / 语义 / 摘要 / 因果 / 巩固;stdio 模式不适用,调试可关)
+enable_scheduler: true
+
+# ============================================================
+# fact_extractor: llm 时需要的环境变量(写在 shell / 服务环境,不放本文件):
+#   SMILEX_EXTRACT_API_KEY    必填(未设置时抽取直接降级,不报错)
+#   SMILEX_EXTRACT_BASE_URL   可选(OpenAI 兼容代理 / 私有网关)
+#   SMILEX_EXTRACT_MODEL      模型名(默认 glm-4.5-flash,便宜模型即可)
+# ============================================================

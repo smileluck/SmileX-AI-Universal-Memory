@@ -40,9 +40,10 @@ middlewares → memory(Layer 0-5,不感知 server 层存在)
 ### 3.1 `server/config.py` — ServerConfig
 
 - 配置文件 `~/.smilex/config.toml`(TOML),字段:`db_path` / `host` / `port` /
-  `embedder` / `token_budget` / `enable_scheduler`
+  `embedder` / `reranker` / `fact_extractor` / `token_budget` / `enable_scheduler`
 - `--config` 可指定任意路径,按扩展名识别格式:`.yaml`/`.yml` 走
-  `yaml.safe_load`(PyYAML 已是核心依赖),其余走 `tomllib`;扁平键、字段名相同
+  `yaml.safe_load`(PyYAML 已是核心依赖),其余走 `tomllib`;扁平键、字段名相同;
+  全字段注释示例见仓库根 `config.example.yaml`(守卫测试防漂移)
 - 优先级:CLI 参数 > 配置文件 > 默认值;`serve` 首次运行自动生成模板
   (显式 `--config` 指定不存在文件时直接报错,不静默落默认值)
 

@@ -43,6 +43,10 @@
     非 daemon 启动/未运行)
   - 常驻注册脚本支持 `SMILEX_SERVE_ARGS` 环境变量向 `serve` 传参
     (如 `--config ~/.smilex/config.yaml --port 9000`)
+- 仓库根新增 `config.example.yaml`(全字段中文注释示例:格式/优先级/多实例/
+  embedder/reranker/fact_extractor 的 extras 依赖与 `SMILEX_EXTRACT_*` 环境变量);
+  README 新增「配置文件参数」小节(字段表 + 环境变量说明);
+  守卫测试确保示例文件始终可加载且与默认值一致
 - 结构守卫测试(`tests/unit/test_architecture.py`): AST 断言
   `memory/**` 不 import `smilex.middlewares`、`storage/**` 不 import
   `memory.lifecycle`、pyproject version == `smilex.__version__`

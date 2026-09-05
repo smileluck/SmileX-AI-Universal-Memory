@@ -117,6 +117,29 @@ smilex-memory init <项目目录> --stdio --scan
 smilex-memory doctor
 ```
 
+### 配置文件参数
+
+配置默认读 `~/.smilex/config.toml`(首次 serve 自动生成精简模板);
+`--config` 可指定任意路径,`.toml` 与 `.yaml/.yml` 均可(字段名相同,见仓库根
+[config.example.yaml](config.example.yaml) 全字段注释示例)。
+优先级:CLI 旗标 > 配置文件 > 默认值;多实例用不同端口(pidfile/日志按端口隔离)。
+
+| 字段 | 默认值 | 说明 |
+|---|---|---|
+| `db_path` | `~/.smilex/memory.db` | SQLite 数据库路径(支持 `~` 展开,目录自动创建) |
+| `host` | `127.0.0.1` | 监听地址;`0.0.0.0` 监听所有网卡(注意暴露风险) |
+| `port` | `8765` | 监听端口,可被 `--port` 覆盖 |
+| `embedder` | `hash` | 嵌入器:`hash` 零依赖本地 / `sentence-transformers` 语义检索([embedding] extras,首启下载模型) |
+| `reranker` | `noop` | 重排序器:`noop` / `cross-encoder` 精排([rerank] extras) |
+| `fact_extractor` | `passthrough` | 事实抽取:`passthrough` 原文入库 / `llm` 写入时抽结构化事实([llm] extras,见下方环境变量) |
+| `token_budget` | `4000` | 召回 token 预算(`memory_recall` 按此裁剪返回内容) |
+| `enable_scheduler` | `true` | serve 进程内 5 类核心调度任务(遗忘衰减 / 语义 / 摘要 / 因果 / 巩固);stdio 模式不适用 |
+
+`fact_extractor: llm` 需设置环境变量(放在 shell / 服务环境,不放配置文件):
+`SMILEX_EXTRACT_API_KEY`(必填,缺失时抽取静默降级)、
+`SMILEX_EXTRACT_BASE_URL`(可选,OpenAI 兼容代理 / 私有网关)、
+`SMILEX_EXTRACT_MODEL`(模型名,默认 `glm-4.5-flash`)。
+
 常驻自启动注册脚本(登录后自动 `smilex-memory serve`,支持
 `SMILEX_SERVE_ARGS="--config ~/.smilex/config.yaml --port 9000"` 传参):
 

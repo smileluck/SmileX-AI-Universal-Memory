@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from smilex.server.config import (
     ServerConfig,
     load_config,
@@ -92,3 +94,21 @@ def test_load_explicit_path_expands_home(tmp_path, monkeypatch):
     (fake_home / "config.toml").write_text("port = 9101\n", encoding="utf-8")
     monkeypatch.setenv("HOME", str(fake_home))
     assert load_config(Path("~/config.toml")).port == 9101
+
+
+def test_repo_example_yaml_is_valid():
+    """仓库根 config.example.yaml 始终可加载且值与默认一致(防文档漂移)."""
+    example = Path(__file__).resolve().parents[2] / "config.example.yaml"
+    if not example.exists():  # wheel 安装场景无仓库根文件
+        pytest.skip("config.example.yaml 不在仓库根")
+    config = load_config(example)
+    defaults = ServerConfig()
+    assert config.host == defaults.host
+    assert config.port == defaults.port
+    # 示例用 ~ 字面量展示展开,比较 resolved 后的路径
+    assert config.resolved_db_path() == defaults.resolved_db_path()
+    assert config.embedder == "hash"
+    assert config.reranker == "noop"
+    assert config.fact_extractor == "passthrough"
+    assert config.token_budget == defaults.token_budget
+    assert config.enable_scheduler is True
