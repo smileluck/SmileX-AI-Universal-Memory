@@ -16,8 +16,9 @@
 3. [公开 API(middlewares)](#3-公开-apimiddlewares)
 4. [写入路径详解](#4-写入路径详解)
 5. [检索路径详解](#5-检索路径详解)
-6. [可插拔组件:三个 Protocol](#6-可插拔组件三个-protocol)
-7. [存储层](#7-存储层)
+6. [可插拔组件:五个 Protocol](#6-可插拔组件五个-protocol)
+7. [可观测性子系统](#6a-可观测性子系统memoryobservability)
+8. [存储层](#7-存储层)
 8. [调度与生命周期任务](#8-调度与生命周期任务)
 9. [并发控制](#9-并发控制)
 10. [知识质量](#10-知识质量)
@@ -230,7 +231,7 @@ schema < 13 的老库 `fts_fragments` 不存在时 `OperationalError` 捕获 →
 (LoCoMo 实测裸 BGE-M3 R\@10 86.7%);BM25 补关键词面,RRF 融合后
 96.7%(conv-26 采样),全量 95.3%。两路互补,单路都到不了。
 
-## 6. 可插拔组件:三个 Protocol
+## 6. 可插拔组件:五个 Protocol
 
 三者同构设计——默认零依赖实现 + 可选强实现,core 永不强制引入
 LLM 或重模型;均有 `Config` dataclass + `get_xxx()` 工厂
@@ -244,7 +245,33 @@ LLM 或重模型;均有 `Config` dataclass + `get_xxx()` 工厂
 | `Reranker.rerank(query, documents) -> list[float]` | `NoopReranker`(返回 \[])                   | `CrossEncoderReranker`(bge-reranker-v2-m3,懒加载,batch 16 防 MPS 卡死,`asyncio.to_thread` 包裹 predict)                    | `[rerank]`    |
 | `FactExtractor.extract(content) -> list[str]`      | `PassThroughExtractor`(\[content])       | `LLMFactExtractor`(OpenAI 兼容,env `SMILEX_EXTRACT_API_KEY/BASE_URL/MODEL`,temperature 0,失败/无 key → \[content])      | `[llm]`       |
 
-server 层 config.toml 对应开关:`embedder` / `reranker` / `fact_extractor`。
+同构家族还有两个(§15.3/§15.4,2026-09 新增):
+
+| Protocol                     | 默认(零依赖)     | 可选增强                                                       | extra       |
+| ---------------------------- | ---------------- | -------------------------------------------------------------- | ----------- |
+| `PIIMasker.mask(text) -> str` | `NoopPIIMasker`(直通) | `RegexPIIMasker`(email/手机/身份证校验位/银行卡 Luhn/IPv4/API key;redact/hash/mask 三策略,幂等) | 无(内置) |
+| `Tracer.span(name, **attrs)` | `NoopTracer`(空 CM) | `OTelTracer`(opentelemetry,宿主自配 provider 优先)            | `[tracing]` |
+
+server 层 config.toml 对应开关:`embedder` / `reranker` / `fact_extractor` /
+`pii_masker` / `tracing`。
+
+## 6a. 可观测性子系统(`memory/observability/`)
+
+- **metrics**: 零依赖 Prometheus 文本注册表(Counter/Gauge/Histogram;
+  Gauge 支持 callback 惰性求值——队列深度/库体积 scrape 时才读,写路径零
+  开销);`GET /metrics` 暴露(注册在 MCP 兜底 mount 之前)。
+- **audit**: 变更事件 JSONL(默认库文件旁 `audit-<db>.jsonl`),只记
+  session/scope/memory_ids/status/耗时/`content_sha256`(脱敏后指纹),
+  **不落原文** → 审计自身不成 PII 泄漏面;失败降级不抛。
+- **telemetry**: `Telemetry` 三件套容器 + `StandardMetrics`(write/recall
+  计数与延迟)+ `make_scheduler_observer`(任务终态计数 + 失败告警)+
+  进程级 `IntegrityReport` 持有者(巡检任务写,health/gauge 读)。
+- **logging**: structlog 门面(JSON→stderr),import 即安全默认(WARNING
+  级安静),入口 `configure_logging(level)` 提级。
+- 消费端 `TelemetryMemoryMiddleware`(组合包装,覆写 write/recall/
+  bootstrap 入口,核心逻辑零改动);`db_integrity` 为第 6 个核心调度任务
+  (LOW/每日 quick_check)。`/api/health` 增 db/scheduler/alerts 三段,
+  `status`/`started_at`/`uptime_s` 契约字段不变(daemon 依赖)。
 
 ## 7. 存储层
 

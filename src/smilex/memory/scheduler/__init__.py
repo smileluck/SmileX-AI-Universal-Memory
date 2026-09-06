@@ -22,6 +22,7 @@ from .models import SchedulerTask, TaskDefinition, TaskPriority, TaskStatus, Tri
 from .scheduler import MemoryTaskScheduler, SchedulerConfig
 from .tasks import (
     CORE_TASK_NAMES,
+    TASK_DB_INTEGRITY,
     CoreTaskConfig,
     CoreTaskRunner,
     register_core_tasks,
@@ -49,6 +50,7 @@ __all__ = [
     "MemoryTaskScheduler",
     "ProjectBootstrap",
     "SchedulerConfig",
+    "TASK_DB_INTEGRITY",
     "SchedulerTask",
     "SeedInjector",
     "TaskDefinition",

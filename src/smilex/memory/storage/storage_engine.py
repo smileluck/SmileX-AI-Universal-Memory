@@ -110,6 +110,11 @@ class StorageEngine:
         await self._engine.close()
 
     @property
+    def db_path(self) -> str:
+        """库文件路径(监控/巡检用;":memory:" 无文件语义)."""
+        return self._engine.db_path
+
+    @property
     def conn(self) -> aiosqlite.Connection:
         """底层 aiosqlite 连接(高级用户可直接执行 SQL)."""
         return self._engine.conn

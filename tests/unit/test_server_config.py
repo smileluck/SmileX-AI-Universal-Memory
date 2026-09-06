@@ -112,3 +112,10 @@ def test_repo_example_yaml_is_valid():
     assert config.fact_extractor == "passthrough"
     assert config.token_budget == defaults.token_budget
     assert config.enable_scheduler is True
+    # 可观测性与安全键(§15.3/§15.4)
+    assert config.metrics is True
+    assert config.audit is True
+    assert config.audit_path is None
+    assert config.audit_reads is False
+    assert config.tracing == "noop"
+    assert config.pii_masker == "noop"

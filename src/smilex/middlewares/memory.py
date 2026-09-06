@@ -44,6 +44,7 @@ from ..memory.lifecycle.l0_snapshot import L0SnapshotStore
 from ..memory.lifecycle.l0_working_memory import L0WorkingMemory
 from ..memory.lifecycle.promotion import PromotionManager
 from ..memory.lifecycle.token_counter import TokenCounter
+from ..memory.pii import NoopPIIMasker, PIIMasker
 from ..memory.reranker import Reranker
 from ..memory.storage.storage_engine import StorageEngine
 from ..memory.storage.vector_store import VectorStore
@@ -82,6 +83,9 @@ class MemoryMiddleware(_WritePathMixin, _RecallPathMixin, _BootstrapFacadeMixin)
             smilex.memory.extractor)
         facts_bypass_l0: 抽取产出的事实是否跳过 L0 直送 L1 晋升
             (默认 True;短事实留在 L0 对 recall 不可见,仅 PassThrough 下无影响)
+        pii_masker: 写入前 PII 脱敏器(None 时 NoopPIIMasker 直通 —
+            记忆系统常需记住用户联系方式,默认不脱敏;正则后端见
+            smilex.memory.pii)
     """
 
     def __init__(
@@ -97,6 +101,7 @@ class MemoryMiddleware(_WritePathMixin, _RecallPathMixin, _BootstrapFacadeMixin)
         reranker: Reranker | None = None,
         fact_extractor: FactExtractor | None = None,
         facts_bypass_l0: bool = True,
+        pii_masker: PIIMasker | None = None,
     ) -> None:
         self._owns_engine = engine is None
         self._engine = engine or StorageEngine(db_path)
@@ -118,6 +123,7 @@ class MemoryMiddleware(_WritePathMixin, _RecallPathMixin, _BootstrapFacadeMixin)
         )
         self._extractor = fact_extractor or PassThroughExtractor()
         self._facts_bypass_l0 = facts_bypass_l0
+        self._pii = pii_masker or NoopPIIMasker()
         self._snapshots = L0SnapshotStore(self._engine)
         self._bootstrap: ProjectBootstrap | None = None
         # 最近一次 initialize_project 的项目 ID,write 的 scope_id 缺省值
@@ -168,6 +174,11 @@ class MemoryMiddleware(_WritePathMixin, _RecallPathMixin, _BootstrapFacadeMixin)
     def concurrency(self) -> ConcurrencyController:
         """Layer 4 并发控制器(测试/诊断/任务链接入用)."""
         return self._concurrency
+
+    @property
+    def pii_masker(self) -> PIIMasker:
+        """写入前 PII 脱敏器(审计层取脱敏后摘要用)."""
+        return self._pii
 
     def _require_initialized(self) -> None:
         if not self._engine.is_initialized:

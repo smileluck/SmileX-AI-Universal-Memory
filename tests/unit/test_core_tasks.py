@@ -147,7 +147,7 @@ async def test_default_triggers_registered(engine):
         engine,
         config=CoreTaskConfig(l1_pressure=lambda: False, potential_causal_links=lambda: False),
     )
-    assert len(sched._time_triggers) == 4
+    assert len(sched._time_triggers) == 5  # 整合/摘要/语义/遗忘 + db_integrity 巡检
     for event in ("memory_full", "episode_end", "session_end", "causal_inference"):
         assert sched._event_trigger.knows(event)
     assert {r.name for r in sched._adaptive_trigger.rules} == {

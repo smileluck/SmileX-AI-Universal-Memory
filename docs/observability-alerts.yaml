@@ -1,0 +1,51 @@
+# SmileX-AI-Memory Prometheus 告警规则样例(§15.3)
+#
+# 用法: 抓取任务配好 GET /metrics 后,把本文件内容并入 Prometheus
+# 规则目录(prometheus.yml 的 rule_files),或直接粘贴进 Alertmanager
+# 配置评审。阈值与 /api/health 的 alerts 字段一致(本地自包含告警):
+#   - 调度队列积压 > 1000
+#   - 库体积 > 10GB
+#   - 任务失败率 > 5%(5 分钟窗口,样本充足才判)
+# 另加固有规则: 完整性巡检异常(critical)。
+
+groups:
+  - name: smilex-memory
+    rules:
+      - alert: SmilexQueueBacklog
+        expr: smilex_task_queue_depth > 1000
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "记忆服务调度队列积压 ({{ $value }})"
+          description: "队列深度持续超过 1000,任务产出速度跟不上触发频率。"
+
+      - alert: SmilexDbSize
+        expr: smilex_db_size_bytes > 10 * 1024 * 1024 * 1024
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "记忆库体积超 10GB ({{ $value | humanize1024 }})"
+          description: "考虑调低保留策略或手动触发归档(smilex-memory 面板 / Archiver)。"
+
+      - alert: SmilexTaskFailureRate
+        expr: |
+          sum(rate(smilex_task_total{status="failed"}[5m])) by (name)
+            /
+          sum(rate(smilex_task_total[5m])) by (name)
+            > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "调度任务 {{ $labels.name }} 失败率超 5%"
+          description: "查看服务日志中 scheduler_task_failed 事件获取错误详情。"
+
+      - alert: SmilexDbIntegrity
+        expr: smilex_db_integrity_ok == 0
+        labels:
+          severity: critical
+        annotations:
+          summary: "SQLite 完整性巡检异常"
+          description: "PRAGMA quick_check 未通过,立即备份数据库并排查存储。"

@@ -7,6 +7,8 @@ _current_scope_id 与 _require_initialized)由宿主类提供.
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from ..memory.concurrency import ConcurrencyController
 from ..memory.contracts import (
     ConflictInfo,
@@ -23,7 +25,35 @@ from ..memory.models import (
     MemoryScope,
     Triple,
 )
+from ..memory.observability import get_logger
+from ..memory.pii import NoopPIIMasker, PIIMasker
 from ..memory.storage.storage_engine import scope_path
+
+_logger = get_logger("write")
+
+
+def _apply_pii(request: WriteRequest, masker: PIIMasker) -> WriteRequest:
+    """写入前 PII 脱敏(§15.4): content/entities 名/三元组自由文本.
+
+    NoopPIIMasker 直通时原样返回(零开销);脱敏幂等 — 替换产物不再
+    匹配任何模式,重复调用结果不变。
+    """
+    if isinstance(masker, NoopPIIMasker):
+        return request
+    relations = [
+        replace(
+            rel,
+            subject_name=masker.mask(rel.subject_name) if rel.subject_name else None,
+            object_value=masker.mask(rel.object_value) if rel.object_value else None,
+        )
+        for rel in request.relations
+    ]
+    return replace(
+        request,
+        content=masker.mask(request.content),
+        entities=[masker.mask(e) for e in request.entities],
+        relations=relations,
+    )
 
 
 class _RelationConflictError(Exception):
@@ -71,6 +101,7 @@ class _WritePathMixin:
         AUTO_LAST(LWW)放行,拒绝/人工策略返回 CONFLICT。
         """
         self._require_initialized()
+        request = _apply_pii(request, self._pii)
         scope_id = scope_id or self._current_scope_id
         scope_str = scope_path(request.scope, scope_id)  # 提前校验 PROJECT/TENANT 必须有 scope_id
         holder = chain_id or session_id
@@ -107,7 +138,8 @@ class _WritePathMixin:
         #    PassThrough(默认)下 facts == [request.content],行为与历史一致
         try:
             facts = await self._extractor.extract(request.content)
-        except Exception:
+        except Exception as exc:  # noqa: BLE001 — 抽取失败降级回原文,不阻断写入
+            _logger.warning("fact_extractor_failed", error=str(exc), fallback="content")
             facts = [request.content]
         if not facts:  # 防御: 抽取器返回空列表时退回原文
             facts = [request.content]

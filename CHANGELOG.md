@@ -6,6 +6,52 @@
 
 ## [Unreleased]
 
+### Added
+
+- **可观测性四件套(§15.3,零新增核心依赖)**:
+  - `GET /metrics` 指标端点(Prometheus 文本格式,`memory/observability/
+    metrics.py` 手写 Counter/Gauge/Histogram 注册表,Gauge 支持回调惰性
+    求值): write/recall 计数与延迟直方图、`smilex_task_total{name,status}`
+    任务终态、队列深度、库体积、巡检结果;`/api/*` 请求计数(路径模板化
+    防 label 基数爆炸);告警规则样例 `docs/observability-alerts.yaml`
+    (队列>1000 / 库>10GB / 失败率>5%,与 `/api/health` 的 alerts 同阈值)
+  - 审计日志(JSONL 追加写,默认库文件旁 `audit-<db名>.jsonl`): 变更事件
+    记录 session/scope/memory_ids/状态/耗时/内容指纹 — **不落原文**,
+    审计文件自身不含 PII;`audit_reads` 可选记录 recall
+  - `/api/health` 升级: 新增 db 连接态/体积/巡检结果、调度器队列深度、
+    alerts 告警数组;`status`/`started_at`/`uptime_s` 契约字段不变
+    (daemon status 依赖)
+  - 第 6 个核心调度任务 `db_integrity`(LOW,每日 `PRAGMA quick_check`
+    + 页统计 → `smilex_db_integrity_ok` gauge + health)
+  - 结构化日志: structlog(核心依赖但从未使用)正式启用,库内统一
+    `get_logger()` JSON→stderr;调度任务失败与事实抽取降级不再静默
+  - `TelemetryMemoryMiddleware`(组合包装,核心 write/recall 零改动):
+    指标/审计/span 三合一;`Telemetry.from_config` 按 ServerConfig 组装
+- **PII 脱敏(§15.4,默认 noop 一键开启)**: `memory/pii.py` 可选组件
+  (与 reranker/extractor 同模式): `RegexPIIMasker` 高置信度内置类别 —
+  email / 手机号 / 身份证(GB11643 校验位)/ 银行卡(Luhn)/ IPv4(段值
+  校验)/ API key(sk-/AKIA/ghp_/JWT/Bearer);每类独立策略 redact(默认)/
+  hash(sha256 前 8 位,等值保持可连接)/ mask(部分保留);`extra_patterns`
+  自定义类别;`MemoryMiddleware(pii_masker=...)` 于 write() 入口对
+  content/实体名/三元组自由文本统一脱敏(幂等;默认 noop 直通,记忆系统
+  常需记住用户联系方式)
+- **OpenTelemetry 分布式追踪(可选 `[tracing]` extras)**: `Tracer` Protocol
+  + NoopTracer 默认零开销;`tracing: otel` 后 write/recall/bootstrap 产生
+  真实 span(默认 ConsoleSpanExporter,宿主自配 OTLP provider 时优先尊重)
+- ServerConfig 新增 6 键: `metrics`/`audit`/`audit_path`/`audit_reads`/
+  `tracing`/`pii_masker`(全字段注释入 config.example.yaml,守卫测试同步)
+- `MemoryTaskScheduler` 公共 `queue_depth`/`current_task`/`recent_tasks`
+  属性与 `observer` 终态回调(任务计数与失败告警的挂钩点);
+  `StorageEngine.db_path` 属性
+- `/api/stats` 与 MCP `memory_stats` 重复的计数 SQL 统一为
+  `server/stats.py collect_stats()`(memory_stats 返回字段随之补齐对齐)
+
+### Fixed
+
+- 事实抽取器异常静默降级现在会打 warning 日志(此前完全无痕)
+- 调度任务失败(_run_guarded)现在有 error 结构化日志(此前仅内存
+  history 可查)
+
 ### Changed
 
 - **项目结构重构(零 API 破坏,全部公共导入路径经 shim/门面保留)**:

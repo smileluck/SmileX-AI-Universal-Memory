@@ -48,9 +48,40 @@ token_budget: 4000
 
 # ---------- 调度 ----------
 
-# serve 进程内是否跑 5 类核心调度任务
-# (遗忘衰减 / 语义 / 摘要 / 因果 / 巩固;stdio 模式不适用,调试可关)
+# serve 进程内是否跑核心调度任务
+# (遗忘衰减 / 语义 / 摘要 / 因果 / 巩固 + 每日 SQLite 完整性巡检;stdio 模式不适用,调试可关)
 enable_scheduler: true
+
+# ---------- 可观测性(全部安全默认值) ----------
+
+# GET /metrics 指标端点(Prometheus 文本格式,零依赖手写实现):
+#   write/recall 计数与延迟分布 / 调度任务终态与队列深度 / 库体积 / 巡检结果
+metrics: true
+
+# 变更事件审计日志(JSONL 追加写;记录 session/scope/memory_ids/状态/耗时/
+# 内容指纹,不落原文 → 审计文件自身不含 PII)
+audit: true
+
+# 审计文件路径(留空 = 默认库文件旁 audit-<db名>.jsonl;":memory:" 库默认禁用)
+# audit_path: /var/log/smilex/audit.jsonl
+
+# 是否审计 recall 读事件(读事件量大,默认只记变更)
+audit_reads: false
+
+# 分布式追踪:
+#   noop  不追踪(默认,零依赖)
+#   otel  OpenTelemetry span(memory.write/recall/bootstrap)
+#         (需 pip install 'smilex-ai-memory[tracing]';默认输出到 stderr,
+#          接 Jaeger/OTLP 见 README「可观测性与安全」小节)
+tracing: noop
+
+# ---------- 安全 ----------
+
+# 写入前 PII 脱敏(仅 write() 路径;init 扫描导入不受影响):
+#   noop  直通(默认 — agent 记忆常需记住用户联系方式,默认不脱敏)
+#   regex 高置信度模式替换: email/手机号/身份证(校验位)/银行卡(Luhn)/
+#         IPv4/API key → [EMAIL] 类占位符;策略与自定义类别见 README
+pii_masker: noop
 
 # ============================================================
 # fact_extractor: llm 时需要的环境变量(写在 shell / 服务环境,不放本文件):

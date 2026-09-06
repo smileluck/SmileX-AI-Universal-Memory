@@ -133,7 +133,13 @@ smilex-memory doctor
 | `reranker` | `noop` | 重排序器:`noop` / `cross-encoder` 精排([rerank] extras) |
 | `fact_extractor` | `passthrough` | 事实抽取:`passthrough` 原文入库 / `llm` 写入时抽结构化事实([llm] extras,见下方环境变量) |
 | `token_budget` | `4000` | 召回 token 预算(`memory_recall` 按此裁剪返回内容) |
-| `enable_scheduler` | `true` | serve 进程内 5 类核心调度任务(遗忘衰减 / 语义 / 摘要 / 因果 / 巩固);stdio 模式不适用 |
+| `enable_scheduler` | `true` | serve 进程内核心调度任务(遗忘衰减 / 语义 / 摘要 / 因果 / 巩固 + 每日 SQLite 巡检);stdio 模式不适用 |
+| `metrics` | `true` | `GET /metrics` 指标端点(Prometheus 文本格式,零依赖) |
+| `audit` | `true` | 变更事件 JSONL 审计(默认库文件旁 `audit-<db名>.jsonl`,不落原文) |
+| `audit_path` | 空 | 审计文件显式路径(空 = 按库文件推导;`":memory:"` 库默认禁用) |
+| `audit_reads` | `false` | 是否审计 recall 读事件(量大,默认只记变更) |
+| `tracing` | `noop` | 分布式追踪:`noop` / `otel`([tracing] extras) |
+| `pii_masker` | `noop` | 写入前 PII 脱敏:`noop` 直通 / `regex` 高置信度正则替换 |
 
 `fact_extractor: llm` 需设置环境变量(放在 shell / 服务环境,不放配置文件):
 `SMILEX_EXTRACT_API_KEY`(必填,缺失时抽取静默降级)、
@@ -154,6 +160,45 @@ Web 面板(`http://127.0.0.1:8765/`)为只读,零依赖纯静态、可离线:
 另提供 `/api/health` 健康检查。写入统一走 MCP 工具
 (`memory_recall` / `memory_write` / `memory_init_project` / `memory_stats`)。
 详见 [Server 层设计](docs/design/modules/13-server-layer.md)。
+
+### 可观测性与安全
+
+四件套默认开启(除 tracing/PII 脱敏为可选后端),全部零新增核心依赖:
+
+- **指标** — `GET /metrics`(Prometheus 文本格式,手写零依赖):write/recall
+  计数与延迟直方图、调度任务终态(`smilex_task_total{name,status}`)、队列深度、
+  库体积、每日巡检结果。接 Prometheus 直接抓取即可,告警规则样例见
+  [docs/observability-alerts.yaml](docs/observability-alerts.yaml)
+  (队列积压 >1000 / 库体积 >10GB / 任务失败率 >5%,与 `/api/health` 的
+  `alerts` 字段同阈值 — 本地自包含告警,不依赖 Prometheus 也能看到)。
+- **审计日志** — 变更事件 JSONL 追加写(默认库文件旁 `audit-<db名>.jsonl`):
+  记录 session/scope/memory_ids/状态/耗时/**内容指纹**(`content_sha256`,
+  不落原文 → 审计文件自身不含 PII)。`audit_reads: true` 可补记 recall。
+- **健康检查增强** — `/api/health` 在 uptime/配置摘要之外新增 db 连接态、
+  库体积、巡检结果(`db_integrity` 调度任务每日跑 `PRAGMA quick_check`)、
+  调度器队列深度与 `alerts` 告警数组;原字段形状不变,daemon 依赖的
+  `status`/`started_at`/`uptime_s` 契约保持。
+- **PII 脱敏**(`pii_masker: regex` 开启)— 写入前对 content/实体名/三元组
+  自由文本做高置信度替换:email / 手机号 / 身份证(GB11643 校验位)/ 银行卡
+  (Luhn)/ IPv4 / API key(sk-/AKIA/ghp_/JWT/Bearer)。每类可独立选策略:
+  `redact`(默认,`[EMAIL]`)/ `hash`(`[EMAIL:9f86d081]`,等值保持可连接)/
+  `mask`(`138****5678`);支持 `extra_patterns` 自定义类别。库级用法:
+  `MemoryMiddleware(..., pii_masker=get_pii_masker(PIIConfig(backend="regex")))`。
+  注意:agent 记忆常常就是要记住用户的联系方式,故默认 `noop` 直通。
+- **结构化日志** — structlog JSON → stderr(库内统一 `get_logger()`,
+  默认 WARNING 级安静,`--log-level` 提级);调度任务失败、事实抽取降级等
+  此前静默的路径现在都有日志。
+- **分布式追踪**(可选 `[tracing]` extras)— `tracing: otel` 后
+  write/recall/bootstrap 产生 OpenTelemetry span;默认 ConsoleSpanExporter
+  打到 stderr,接 OTLP/Jaeger 在入口自配 provider 即可被尊重:
+
+  ```python
+  from opentelemetry.sdk.trace import TracerProvider
+  from opentelemetry.sdk.trace.export import BatchSpanProcessor, OtlpGrpcSpanExporter
+  provider = TracerProvider()
+  provider.add_span_processor(BatchSpanProcessor(OtlpGrpcSpanExporter()))
+  opentelemetry.trace.set_tracer_provider(provider)  # 先于服务启动执行
+  ```
 
 ## Benchmark
 

@@ -16,15 +16,19 @@ from __future__ import annotations
 
 import asyncio
 from collections import deque
+from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass, field
 from typing import Any
 
 from ..models.enums import PreemptionPolicy
+from ..observability.logging import get_logger
 from ..storage.storage_engine import StorageEngine
 from .checkpoint import Checkpoint, CheckpointStore, InterruptContext, TaskInterruptedError
 from .models import SchedulerTask, TaskDefinition, TaskPriority, TaskStatus, TriggerType
 from .triggers import AdaptiveRule, AdaptiveTrigger, EventTrigger, TimeTrigger
+
+_logger = get_logger("scheduler")
 
 
 @dataclass
@@ -63,10 +67,18 @@ class MemoryTaskScheduler:
     再 submit CRITICAL 任务(会自我等待死锁).
     """
 
-    def __init__(self, storage: StorageEngine, config: SchedulerConfig | None = None) -> None:
+    def __init__(
+        self,
+        storage: StorageEngine,
+        config: SchedulerConfig | None = None,
+        *,
+        observer: Callable[[SchedulerTask], None] | None = None,
+    ) -> None:
         self._storage = storage
         self._store = CheckpointStore(storage)
         self.config = config or SchedulerConfig()
+        # 终态观察者(§15.3): 任务计数/告警日志挂钩,失败不抛不阻塞调度
+        self._observer = observer
 
         self._definitions: dict[str, TaskDefinition] = {}
         self._queue: deque[SchedulerTask] = deque()
@@ -278,6 +290,21 @@ class MemoryTaskScheduler:
         """队列空且无执行中任务."""
         return not self._queue and self._current is None
 
+    @property
+    def queue_depth(self) -> int:
+        """当前队列深度(排队中 + 执行中;指标与健康检查用)."""
+        return len(self._queue) + (1 if self._current is not None else 0)
+
+    @property
+    def current_task(self) -> SchedulerTask | None:
+        """正在执行的任务(None = 空闲;健康检查用)."""
+        return self._current.task if self._current is not None else None
+
+    @property
+    def recent_tasks(self) -> tuple[SchedulerTask, ...]:
+        """最近终态任务(history_size 条窗口;失败率告警用)."""
+        return tuple(self._history)
+
     async def wait_idle(self, timeout: float | None = None) -> None:
         """等待队列排空且当前任务结束(测试/关停用)."""
         if self._idle is None:
@@ -356,6 +383,16 @@ class MemoryTaskScheduler:
             done.set()
             self._current = None
             self._history.append(task)
+            self._notify(task)
+
+    def _notify(self, task: SchedulerTask) -> None:
+        """终态观察者回调(§15.3);观察者异常不影响调度循环."""
+        if self._observer is None:
+            return
+        try:
+            self._observer(task)
+        except Exception as exc:  # noqa: BLE001 — 观察者故障不拖垮调度
+            _logger.warning("scheduler_observer_failed", error=str(exc))
 
     async def _run_guarded(
         self, task: SchedulerTask, definition: TaskDefinition, ctx: InterruptContext
@@ -373,6 +410,7 @@ class MemoryTaskScheduler:
         except Exception as exc:  # noqa: BLE001 — 任务失败不拖垮调度循环
             task.status = TaskStatus.FAILED
             task.error = f"{type(exc).__name__}: {exc}"
+            _logger.error("scheduler_task_failed", task=task.name, error=task.error)
             await self._store.delete(task.id)
         else:
             task.status = TaskStatus.COMPLETED

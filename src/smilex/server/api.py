@@ -1,7 +1,9 @@
 """面板 JSON API(server 层)— 只读监控 + 召回调试.
 
 端点:
-- GET  /api/health       运行状态(uptime + 配置摘要,面板状态区轮询)
+- GET  /api/health       运行状态(uptime + 配置摘要 + db/调度器/告警,
+                         面板状态区轮询;status/started_at/uptime_s 三键
+                         是 daemon status 的契约字段,保持不变)
 - GET  /api/stats        各层/各 scope 计数 + L0 会话/因果链/库体积
 - GET  /api/memories     浏览/关键词搜索(entities/triples/fragments 联合,
                          fragments 关键词走 FTS5 BM25,trigram 支持中文子串)
@@ -21,12 +23,21 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
 
+from ..memory.observability import get_integrity_report
 from ..middlewares.dto import RecallRequest
+from .stats import collect_stats
 
 if TYPE_CHECKING:
     from fastapi import APIRouter
 
     from .mcp_server import MemoryService
+
+# §15.3 告警阈值(本地自包含告警;Prometheus 规则样例见 docs/observability-alerts.yaml)
+ALERT_QUEUE_DEPTH = 1000
+ALERT_DB_BYTES = 10 * 1024**3  # 10GB
+ALERT_FAILURE_RATE = 0.05
+ALERT_FAILURE_MIN_SAMPLES = 20  # 样本不足不判失败率
+
 
 
 class RecallTestBody(BaseModel):
@@ -90,6 +101,54 @@ def _require_fastapi() -> None:
         ) from e
 
 
+def _db_size(config: Any) -> int:
+    db_file = config.resolved_db_path()
+    return db_file.stat().st_size if db_file.exists() else 0
+
+
+def _collect_alerts(service: MemoryService) -> list[dict[str, str]]:
+    """本地自包含告警(§15.3 阈值): 队列积压 / 库体积 / 任务失败率."""
+    alerts: list[dict[str, str]] = []
+    scheduler = service.scheduler
+    if scheduler is not None:
+        depth = scheduler.queue_depth
+        if depth > ALERT_QUEUE_DEPTH:
+            alerts.append({
+                "name": "queue_backlog",
+                "severity": "warning",
+                "detail": f"调度队列深度 {depth} > {ALERT_QUEUE_DEPTH}",
+            })
+        finished = [
+            t for t in scheduler.recent_tasks
+            if t.status.value in ("completed", "failed")
+        ]
+        if len(finished) >= ALERT_FAILURE_MIN_SAMPLES:
+            failed = sum(1 for t in finished if t.status.value == "failed")
+            rate = failed / len(finished)
+            if rate > ALERT_FAILURE_RATE:
+                alerts.append({
+                    "name": "task_failure_rate",
+                    "severity": "warning",
+                    "detail": f"近 {len(finished)} 个任务失败率 "
+                              f"{rate:.0%} > {ALERT_FAILURE_RATE:.0%}",
+                })
+    db_size = _db_size(service.config)
+    if db_size > ALERT_DB_BYTES:
+        alerts.append({
+            "name": "db_size",
+            "severity": "warning",
+            "detail": f"库体积 {db_size / 1024**3:.1f}GB > 10GB",
+        })
+    report = get_integrity_report()
+    if report is not None and not report.ok:
+        alerts.append({
+            "name": "db_integrity",
+            "severity": "critical",
+            "detail": f"PRAGMA quick_check 异常: {report.detail}",
+        })
+    return alerts
+
+
 def create_api_router(service: MemoryService) -> APIRouter:
     """创建只读 API 路由(挂在 FastAPI app 的 /api 前缀下)."""
     _require_fastapi()
@@ -101,7 +160,10 @@ def create_api_router(service: MemoryService) -> APIRouter:
     @router.get("/health")
     async def health() -> dict[str, Any]:
         c = service.config
+        scheduler = service.scheduler
+        report = get_integrity_report()
         return {
+            # ---- daemon status 契约字段(不可改动形状) ----
             "status": "ok",
             "started_at": datetime.fromtimestamp(started_at, tz=UTC).isoformat(),
             "uptime_s": round(time.time() - started_at, 1),
@@ -113,43 +175,36 @@ def create_api_router(service: MemoryService) -> APIRouter:
                 "enable_scheduler": c.enable_scheduler,
                 "token_budget": c.token_budget,
             },
+            # ---- §15.3 扩展: db / 调度器 / 告警 ----
+            "db": {
+                "connected": service.initialized,
+                "size_bytes": _db_size(c),
+                "integrity": (
+                    None
+                    if report is None
+                    else {
+                        "ok": report.ok,
+                        "checked_at": report.checked_at,
+                        "detail": report.detail,
+                    }
+                ),
+            },
+            "scheduler": {
+                "enabled": c.enable_scheduler,
+                "queue_depth": scheduler.queue_depth if scheduler else None,
+                "current": (
+                    scheduler.current_task.name if scheduler and scheduler.current_task else None
+                ),
+            },
+            "alerts": _collect_alerts(service),
         }
 
     @router.get("/stats")
     async def stats(scope: str | None = None) -> dict[str, Any]:
         memory = await service.get()
-        conn = memory.engine.conn
-        where, params = (" WHERE scope = ?", [scope]) if scope else ("", [])
-        result: dict[str, Any] = {}
-        for table in ("entities", "triples", "temporal_fragments"):
-            cur = await conn.execute(f"SELECT COUNT(*) FROM {table}{where}", params)
-            result[table] = int((await cur.fetchone())[0])
-        cur = await conn.execute("SELECT COUNT(*) FROM vector_links")
-        result["vector_links"] = int((await cur.fetchone())[0])
-        for table, key in (
-            ("memory_l0_snapshot", "l0_snapshots"),
-            ("causal_chains", "causal_chains"),
-        ):
-            cur = await conn.execute(f"SELECT COUNT(*) FROM {table}")
-            result[key] = int((await cur.fetchone())[0])
-        db_file = service.config.resolved_db_path()
-        result["db_size_bytes"] = db_file.stat().st_size if db_file.exists() else 0
-        # 分层计数(temporal_fragments.layer)
-        cur = await conn.execute(
-            f"SELECT layer, COUNT(*) AS c FROM temporal_fragments{where} GROUP BY layer",
-            params,
+        return await collect_stats(
+            memory.engine.conn, service.config.resolved_db_path(), scope=scope
         )
-        result["fragments_by_layer"] = {
-            str(r["layer"]): int(r["c"]) for r in await cur.fetchall()
-        }
-        # scope 分布
-        cur = await conn.execute(
-            "SELECT scope, COUNT(*) AS c FROM entities GROUP BY scope ORDER BY c DESC"
-        )
-        result["entity_scopes"] = {
-            str(r["scope"]): int(r["c"]) for r in await cur.fetchall()
-        }
-        return result
 
     @router.get("/memories")
     async def memories(

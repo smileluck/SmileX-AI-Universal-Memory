@@ -24,7 +24,10 @@ from typing import TYPE_CHECKING
 from ..memory.embedder import EmbedderConfig, get_embedder
 from ..memory.extractor import ExtractorConfig, get_extractor
 from ..memory.models import MemoryScope, ScopeFilter
+from ..memory.observability import Telemetry
+from ..memory.pii import PIIConfig, get_pii_masker
 from ..memory.reranker import RerankerConfig, get_reranker
+from ..middlewares._telemetry import TelemetryMemoryMiddleware
 from ..middlewares.dto import (
     RecallRequest,
     TripleInput,
@@ -32,9 +35,12 @@ from ..middlewares.dto import (
 )
 from ..middlewares.memory import MemoryMiddleware
 from .config import ServerConfig
+from .stats import collect_stats
 
 if TYPE_CHECKING:
     from mcp.server.mcpserver import MCPServer
+
+    from ..memory.scheduler.scheduler import MemoryTaskScheduler
 
 _MCP_IMPORT_HINT = (
     "MCP server 需要 mcp/fastapi/uvicorn,安装: pip install 'smilex-ai-memory[server]'"
@@ -64,10 +70,30 @@ class MemoryService:
         self.mode = mode
         self._memory: MemoryMiddleware | None = None
         self._lock = asyncio.Lock()
+        # 可观测性三件套(§15.3): /metrics 端点与调度观察者共用
+        self._telemetry = Telemetry.from_config(
+            audit=config.audit,
+            audit_path=config.audit_path,
+            audit_reads=config.audit_reads,
+            tracing=config.tracing,
+            db_path=config.resolved_db_path(),
+        )
+        # 调度器句柄(app lifespan 启动后回填;/api/health 读队列深度)
+        self.scheduler: MemoryTaskScheduler | None = None
 
     @property
     def config(self) -> ServerConfig:
         return self._config
+
+    @property
+    def telemetry(self) -> Telemetry:
+        """可观测性三件套(/metrics 端点 / 调度观察者 / 测试共用)."""
+        return self._telemetry
+
+    @property
+    def initialized(self) -> bool:
+        """MemoryMiddleware 是否已初始化(健康检查 db.connected)."""
+        return self._memory is not None
 
     async def get(self) -> MemoryMiddleware:
         """取已初始化的 MemoryMiddleware(首次调用时初始化)."""
@@ -75,7 +101,7 @@ class MemoryService:
             return self._memory
         async with self._lock:
             if self._memory is None:
-                memory = build_middleware(self._config)
+                memory = build_middleware(self._config, telemetry=self._telemetry)
                 await memory.initialize()
                 self._memory = memory
         return self._memory
@@ -86,17 +112,51 @@ class MemoryService:
             self._memory = None
 
 
-def build_middleware(config: ServerConfig, db_path: Path | None = None) -> MemoryMiddleware:
-    """按 ServerConfig 组装 MemoryMiddleware(MemoryService 与 CLI --scan 共用)."""
+def build_middleware(
+    config: ServerConfig,
+    db_path: Path | None = None,
+    *,
+    telemetry: Telemetry | None = None,
+) -> MemoryMiddleware:
+    """按 ServerConfig 组装 MemoryMiddleware(MemoryService 与 CLI --scan 共用).
+
+    任一观测组件启用(audit/tracing)时返回 TelemetryMemoryMiddleware 包装
+    (指标/审计/span);全 noop 时保持基类,行为与历史版本完全一致。
+    """
     embedder = get_embedder(EmbedderConfig(backend=config.embedder))
     reranker = get_reranker(RerankerConfig(backend=config.reranker))
     extractor = get_extractor(ExtractorConfig(backend=config.fact_extractor))
-    return MemoryMiddleware(
-        db_path if db_path is not None else config.resolved_db_path(),
+    pii_masker = get_pii_masker(PIIConfig(backend=config.pii_masker))
+    resolved_db = db_path if db_path is not None else config.resolved_db_path()
+    if telemetry is None:
+        telemetry = Telemetry.from_config(
+            audit=config.audit,
+            audit_path=config.audit_path,
+            audit_reads=config.audit_reads,
+            tracing=config.tracing,
+            db_path=resolved_db,
+        )
+    middleware_cls: type[MemoryMiddleware] = (
+        TelemetryMemoryMiddleware if telemetry.enabled else MemoryMiddleware
+    )
+    if middleware_cls is MemoryMiddleware:
+        return MemoryMiddleware(
+            resolved_db,
+            embedder=embedder,
+            reranker=reranker,
+            fact_extractor=extractor,
+            pii_masker=pii_masker,
+        )
+    wrapped = TelemetryMemoryMiddleware(
+        resolved_db,
         embedder=embedder,
         reranker=reranker,
         fact_extractor=extractor,
+        pii_masker=pii_masker,
+        telemetry=telemetry,
     )
+    wrapped.telemetry_channel = "mcp"
+    return wrapped
 
 
 def _infer_project_root(db_path: Path) -> Path | None:
@@ -235,29 +295,24 @@ def create_mcp_server(service: MemoryService) -> MCPServer:
 
     @server.tool(description="记忆统计: 各层/各 scope 的条目计数(调试与面板用)。")
     async def memory_stats(scope: str | None = None) -> str:
-        """返回实体/三元组/时序片段/向量的计数(JSON)."""
+        """返回实体/三元组/时序片段/向量等计数(JSON;与 /api/stats 同一实现)."""
         memory = await service.get()
-        conn = memory.engine.conn
-        stats: dict[str, int] = {}
-        params: list[str] = []
-        where = ""
-        if scope:
-            where = " WHERE scope = ?"
-            params = [scope]
-        for table in ("entities", "triples", "temporal_fragments"):
-            cursor = await conn.execute(
-                f"SELECT COUNT(*) FROM {table}{where}", params
-            )
-            stats[table] = int((await cursor.fetchone())[0])
-        cursor = await conn.execute("SELECT COUNT(*) FROM vector_links")
-        stats["vector_links"] = int((await cursor.fetchone())[0])
+        stats = await collect_stats(
+            memory.engine.conn, service.config.resolved_db_path(), scope=scope
+        )
         return json.dumps(stats, ensure_ascii=False)
 
     return server
 
 
 async def run_stdio(config: ServerConfig) -> None:
-    """stdio 模式入口(smilex-memory mcp)."""
+    """stdio 模式入口(smilex-memory mcp).
+
+    日志走 stderr(stdout 被 MCP 协议占用);默认 info 级 JSON。
+    """
+    from ..memory.observability import configure_logging
+
+    configure_logging("info")
     service = MemoryService(config, mode="stdio")
     server = create_mcp_server(service)
     try:

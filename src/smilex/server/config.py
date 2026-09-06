@@ -14,7 +14,14 @@
     reranker = "noop"            # 或 "cross-encoder"(需 [rerank] extras)
     fact_extractor = "passthrough"  # 或 "llm"(需 [llm] extras + SMILEX_EXTRACT_* 环境变量)
     token_budget = 4000
-    enable_scheduler = true      # serve 进程内跑 5 类核心调度任务
+    enable_scheduler = true      # serve 进程内跑核心调度任务(含每日 SQLite 巡检)
+
+    # 可观测性与安全(§15.3/§15.4,全部有安全默认值)
+    metrics = true               # GET /metrics(Prometheus 文本格式)
+    audit = true                 # 变更事件 JSONL 审计(库文件旁 audit-<db>.jsonl)
+    audit_reads = false          # 审计 recall 读事件(量大,默认关)
+    tracing = "noop"             # 或 "otel"(需 [tracing] extras)
+    pii_masker = "noop"          # 或 "regex"(写入前脱敏 email/身份证/银行卡等)
 
 等价 config.yaml(扁平键,字段名相同)::
 
@@ -49,6 +56,13 @@ class ServerConfig(BaseModel):
     fact_extractor: str = "passthrough"
     token_budget: int = Field(default=4000, gt=0)
     enable_scheduler: bool = True
+    # ---- 可观测性与安全(§15.3/§15.4) ----
+    metrics: bool = True  # GET /metrics(Prometheus 文本格式,零依赖实现)
+    audit: bool = True  # 变更事件 JSONL 审计(默认库文件旁 audit-<db>.jsonl)
+    audit_path: str | None = None  # 审计文件显式路径(None 按库文件推导)
+    audit_reads: bool = False  # 审计 recall 读事件(量大,默认关)
+    tracing: str = "noop"  # noop | otel(需 [tracing] extras)
+    pii_masker: str = "noop"  # noop | regex(写入前 PII 脱敏)
 
     @property
     def mcp_url(self) -> str:

@@ -249,3 +249,47 @@ async def test_failed_task_status(scheduler):
     assert bad.status is TaskStatus.FAILED
     assert "RuntimeError" in bad.error
     assert scheduler.get_status(good_id).status is TaskStatus.COMPLETED
+
+
+# ---------- §15.3 可观测性挂钩 ----------
+
+async def test_queue_depth_and_current_task(scheduler):
+    """队列深度属性: 空闲 0;排队中 +1;执行中 +1."""
+    assert scheduler.queue_depth == 0
+    assert scheduler.current_task is None
+
+    import asyncio
+
+    release = asyncio.Event()
+
+    async def blocker(ctx, payload):
+        await release.wait()
+
+    scheduler.register(
+        TaskDefinition(name="blocker", run=blocker, priority=TaskPriority.MEDIUM)
+    )
+    scheduler.register(
+        TaskDefinition(name="queued", run=blocker, priority=TaskPriority.LOW)
+    )
+    await scheduler.submit("blocker")
+    await scheduler.submit("queued")
+    await _wait_until(lambda: scheduler.current_task is not None)
+    assert scheduler.current_task.name == "blocker"
+    assert scheduler.queue_depth == 2  # 执行中 1 + 排队 1
+    release.set()
+    await _wait_until(lambda: scheduler.is_idle)
+    assert scheduler.queue_depth == 0
+
+
+async def test_recent_tasks_history(scheduler):
+    """recent_tasks: 终态任务窗口暴露(失败率告警数据源)."""
+    async def ok_run(ctx, payload):
+        return {}
+
+    scheduler.register(TaskDefinition(name="hist", run=ok_run))
+    await scheduler.submit("hist")
+    await _wait_until(lambda: scheduler.is_idle)
+    finished = scheduler.recent_tasks
+    assert len(finished) == 1
+    assert finished[0].name == "hist"
+    assert finished[0].status is TaskStatus.COMPLETED

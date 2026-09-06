@@ -34,6 +34,7 @@ from ._common import (
     SUMMARY_PREFIX,
     TASK_CAUSAL,
     TASK_CONSOLIDATE,
+    TASK_DB_INTEGRITY,
     TASK_FORGET,
     TASK_SEMANTIC,
     TASK_SUMMARIZE,
@@ -41,6 +42,7 @@ from ._common import (
 from .causal import causal
 from .consolidate import consolidate
 from .forget import forget
+from .integrity import db_integrity
 from .semantic import semantic
 from .summarize import summarize
 
@@ -75,6 +77,9 @@ class CoreTaskRunner:
     async def semantic(self, ctx: InterruptContext, payload: dict[str, Any]) -> dict:
         return await semantic(self._storage, ctx, payload)
 
+    async def db_integrity(self, ctx: InterruptContext, payload: dict[str, Any]) -> dict:
+        return await db_integrity(self._storage, ctx, payload)
+
 
 @dataclass
 class CoreTaskConfig:
@@ -92,6 +97,7 @@ class CoreTaskConfig:
     forget_interval_seconds: float = 86400.0  # 每日遗忘
     summarize_interval_seconds: float = 1800.0  # 每 30 分钟摘要
     semantic_interval_seconds: float = 7200.0  # 每 2 小时图维护
+    db_integrity_interval_seconds: float = 86400.0  # 每日 SQLite 巡检(§15.3)
 
     l1_pressure: Any = None  # Callable[[], bool]: L1 使用率 > 80%(§8.3 记忆压力)
     memory_pressure_cooldown: float = 300.0  # 5 分钟
@@ -164,6 +170,15 @@ def register_core_tasks(
             description="语义图维护(NetworkX 连通分量 → L3 缓存)",
         )
     )
+    scheduler.register(
+        TaskDefinition(
+            name=TASK_DB_INTEGRITY,
+            run=runner.db_integrity,
+            priority=TaskPriority.LOW,
+            interruptible=True,
+            description="SQLite 巡检(PRAGMA quick_check + 库体积 → 健康检查)",
+        )
+    )
 
     if config.enable_time_triggers:
         scheduler.add_time_trigger(
@@ -184,6 +199,11 @@ def register_core_tasks(
         scheduler.add_time_trigger(
             TASK_FORGET,
             config.forget_interval_seconds,
+            priority=TaskPriority.LOW,
+        )
+        scheduler.add_time_trigger(
+            TASK_DB_INTEGRITY,
+            config.db_integrity_interval_seconds,
             priority=TaskPriority.LOW,
         )
 
@@ -229,6 +249,7 @@ __all__ = [
     "SUMMARY_PREFIX",
     "TASK_CAUSAL",
     "TASK_CONSOLIDATE",
+    "TASK_DB_INTEGRITY",
     "TASK_FORGET",
     "TASK_SEMANTIC",
     "TASK_SUMMARIZE",
