@@ -16,7 +16,7 @@
 3. [公开 API(middlewares)](#3-公开-apimiddlewares)
 4. [写入路径详解](#4-写入路径详解)
 5. [检索路径详解](#5-检索路径详解)
-6. [可插拔组件:五个 Protocol](#6-可插拔组件五个-protocol)
+6. [可插拔组件:六个 Protocol](#6-可插拔组件六个-protocol)
 7. [可观测性子系统](#6a-可观测性子系统memoryobservability)
 8. [存储层](#7-存储层)
 8. [调度与生命周期任务](#8-调度与生命周期任务)
@@ -232,11 +232,11 @@ schema < 13 的老库 `fts_fragments` 不存在时 `OperationalError` 捕获 →
 (LoCoMo 实测裸 BGE-M3 R\@10 86.7%);BM25 补关键词面,RRF 融合后
 96.7%(conv-26 采样),全量 95.3%。两路互补,单路都到不了。
 
-## 6. 可插拔组件:五个 Protocol
+## 6. 可插拔组件:六个 Protocol
 
-三者同构设计——默认零依赖实现 + 可选强实现,core 永不强制引入
+同构设计——默认零依赖实现 + 可选强实现,core 永不强制引入
 LLM 或重模型;均有 `Config` dataclass + `get_xxx()` 工厂
-(`EmbedderConfig`/`RerankerConfig`/`ExtractorConfig`)。三者位于
+(`EmbedderConfig`/`RerankerConfig`/`ExtractorConfig`)。前三个位于
 `memory/{embedder,reranker,extractor}.py`(`memory/lifecycle/` 下旧路径
 为 shim):
 
@@ -246,15 +246,16 @@ LLM 或重模型;均有 `Config` dataclass + `get_xxx()` 工厂
 | `Reranker.rerank(query, documents) -> list[float]` | `NoopReranker`(返回 \[])                   | `CrossEncoderReranker`(bge-reranker-v2-m3,懒加载,batch 16 防 MPS 卡死,`asyncio.to_thread` 包裹 predict)                    | `[rerank]`    |
 | `FactExtractor.extract(content) -> list[str]`      | `PassThroughExtractor`(\[content])       | `LLMFactExtractor`(OpenAI 兼容,env `SMILEX_EXTRACT_API_KEY/BASE_URL/MODEL`,temperature 0,失败/无 key → \[content])      | `[llm]`       |
 
-同构家族还有两个(§15.3/§15.4,2026-09 新增):
+同构家族还有三个(§15.3/§15.4/P3 演进,2026-09 新增):
 
 | Protocol                     | 默认(零依赖)     | 可选增强                                                       | extra       |
 | ---------------------------- | ---------------- | -------------------------------------------------------------- | ----------- |
 | `PIIMasker.mask(text) -> str` | `NoopPIIMasker`(直通) | `RegexPIIMasker`(email/手机/身份证校验位/银行卡 Luhn/IPv4/API key;redact/hash/mask 三策略,幂等) | 无(内置) |
 | `Tracer.span(name, **attrs)` | `NoopTracer`(空 CM) | `OTelTracer`(opentelemetry,宿主自配 provider 优先)            | `[tracing]` |
+| `Summarizer.summarize(text) -> str` | `RuleSummarizer`(截取+句读回退) | `LLMSummarizer`(OpenAI 兼容,env `SMILEX_SUMMARIZE_*`,GLM 附 thinking disabled,失败回退规则版;插入点 = summarize 调度任务) | `[llm]` |
 
 server 层 config.toml 对应开关:`embedder` / `reranker` / `fact_extractor` /
-`pii_masker` / `tracing`。
+`pii_masker` / `tracing` / `summarizer`。
 
 ## 6a. 可观测性子系统(`memory/observability/`)
 
@@ -566,7 +567,7 @@ token_budget=4000 / enable_scheduler=true`,CLI 可覆盖 db/host/port):
 | COOPERATIVE / checkpoint() | 协作式让出:任务在安全点主动存断点(进度+步号+msgpack cursor)后停下,可 resume 续跑 |
 | consolidate | 核心任务:L1 碎片按 entity/scope 聚合固化成 L2 三元组 |
 | forget / 半衰期 | 核心任务:留存分 = importance × 0.5^(age/30 天),低于 0.1 删除或降权 |
-| summarize | 核心任务:规则式(非 LLM)摘要压缩 |
+| summarize | 核心任务:摘要压缩(默认规则式;summarizer=llm 注入 LLM 后端,见 §6) |
 | semantic | 核心任务:NetworkX 构实体图、预计算连通分量("语义社区")缓存 |
 | bootstrap / 冷启动 | 新项目初始化包:向导问答 + README 解析 + 模板 + 种子注入 + 批量导入;MCP `memory_init_project(project_path=...)` 与 CLI `init --scan` 一键完成"扫描并生成初始记忆"(README/git/markdown/源码),同名项目复用 scope 幂等可重跑 |
 | 扫描忽略规则 | markdown 与源码目录扫描跳过 node_modules/.venv/dist 等依赖与构建目录及隐藏目录,`max_files`(默认 500)截断防超大仓库 |

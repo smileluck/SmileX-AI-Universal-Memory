@@ -56,6 +56,8 @@ class ServerConfig(BaseModel):
     reranker: str = "noop"  # noop | cross-encoder(需 [rerank] extras)
     # passthrough | llm(需 [llm] extras + SMILEX_EXTRACT_* 环境变量)
     fact_extractor: str = "passthrough"
+    # rule | llm(需 [llm] extras + SMILEX_SUMMARIZE_* 环境变量;P3 摘要压缩)
+    summarizer: str = "rule"
     token_budget: int = Field(default=4000, gt=0)
     enable_scheduler: bool = True
     # ---- 可观测性与安全(§15.3/§15.4) ----

@@ -53,14 +53,16 @@ if TYPE_CHECKING:
 
 
 class CoreTaskRunner:
-    """5 类核心任务的执行函数集合(持有 StorageEngine,方法即 run 函数).
+    """核心任务的执行函数集合(持有 StorageEngine,方法即 run 函数).
 
     每个方法签名符合 InterruptibleRun: `async (ctx, payload) -> dict(统计)`;
-    实现委托至同名任务模块(consolidate/forget/summarize/causal/semantic).
+    实现委托至同名任务模块(consolidate/forget/summarize/causal/semantic/
+    db_integrity)。summarizer 可注入 LLM 后端(§5 演进路径,默认规则版)。
     """
 
-    def __init__(self, storage: StorageEngine) -> None:
+    def __init__(self, storage: StorageEngine, summarizer: Any = None) -> None:
         self._storage = storage
+        self._summarizer = summarizer
 
     async def consolidate(self, ctx: InterruptContext, payload: dict[str, Any]) -> dict:
         return await consolidate(self._storage, ctx, payload)
@@ -69,7 +71,7 @@ class CoreTaskRunner:
         return await forget(self._storage, ctx, payload)
 
     async def summarize(self, ctx: InterruptContext, payload: dict[str, Any]) -> dict:
-        return await summarize(self._storage, ctx, payload)
+        return await summarize(self._storage, ctx, payload, summarizer=self._summarizer)
 
     async def causal(self, ctx: InterruptContext, payload: dict[str, Any]) -> dict:
         return await causal(self._storage, ctx, payload)
@@ -110,20 +112,25 @@ def register_core_tasks(
     storage: StorageEngine,
     *,
     config: CoreTaskConfig | None = None,
+    summarizer: Any = None,
 ) -> CoreTaskRunner:
-    """把 5 类核心任务注册到调度器,并按 §8.1/§8.3 装配默认触发器.
+    """把核心任务注册到调度器,并按 §8.1/§8.3 装配默认触发器.
 
-    优先级(§8.2): 整合/因果 HIGH,摘要/语义 MEDIUM,遗忘 LOW;全部可中断.
+    优先级(§8.2): 整合/因果 HIGH,摘要/语义 MEDIUM,遗忘/巡检 LOW;全部可中断.
     触发器默认:
-    - 时间: 整合 1h / 摘要 30min / 语义 2h / 遗忘 1d(均不立即触发)
+    - 时间: 整合 1h / 摘要 30min / 语义 2h / 遗忘 1d / 巡检 1d(均不立即触发)
     - 事件: memory_full→整合 / episode_end→摘要 / session_end→遗忘 / causal_inference→因果
     - 自适应: 记忆压力→整合 / 潜在因果→因果(条件由 config 注入,带冷却)
+
+    Args:
+        summarizer: 摘要后端注入(None = RuleSummarizer;LLM 后端由
+            server 层按 config.summarizer 构造,见 smilex.memory.summarizer)
 
     Returns:
         CoreTaskRunner(便于测试直接调用执行函数或自定义注册)
     """
     config = config or CoreTaskConfig()
-    runner = CoreTaskRunner(storage)
+    runner = CoreTaskRunner(storage, summarizer=summarizer)
 
     scheduler.register(
         TaskDefinition(
@@ -149,7 +156,7 @@ def register_core_tasks(
             run=runner.summarize,
             priority=TaskPriority.MEDIUM,
             interruptible=True,
-            description="长 fragment 规则版摘要(截取/模板,无 LLM)",
+            description="长 fragment 摘要压缩(默认规则截取;summarizer 可注入 LLM 后端)",
         )
     )
     scheduler.register(

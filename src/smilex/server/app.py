@@ -54,13 +54,20 @@ def create_app(config: ServerConfig) -> FastAPI:
             if config.enable_scheduler:
                 from ..memory.scheduler.scheduler import MemoryTaskScheduler
                 from ..memory.scheduler.tasks import register_core_tasks
+                from ..memory.summarizer import SummarizerConfig, get_summarizer
 
                 memory = await service.get()
                 scheduler = MemoryTaskScheduler(
                     memory.engine,
                     observer=make_scheduler_observer(service.telemetry),
                 )
-                register_core_tasks(scheduler, memory.engine)
+                register_core_tasks(
+                    scheduler,
+                    memory.engine,
+                    summarizer=get_summarizer(
+                        SummarizerConfig(backend=config.summarizer)
+                    ),
+                )
                 # 回填句柄供 /api/health 读队列深度;关停时清理
                 service.scheduler = scheduler
                 await scheduler.start()

@@ -1,4 +1,4 @@
-"""摘要任务(规则版,无 LLM)."""
+"""摘要任务(默认规则版,可注入 LLM 后端见 smilex.memory.summarizer)."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 from ....utils.ids import generate_id
 from ....utils.timeutil import now_utc, to_iso
+from ...summarizer import RuleSummarizer, Summarizer
 from ._common import SUMMARY_ID_SUFFIX, SUMMARY_PREFIX, _scope_clause
 
 if TYPE_CHECKING:
@@ -14,33 +15,27 @@ if TYPE_CHECKING:
     from ..checkpoint import InterruptContext
 
 
-def _rule_summary(content: str, summary_length: int) -> str:
-    """规则版摘要:截取前 summary_length 字,优先在句末标点处截断."""
-    if len(content) <= summary_length:
-        return content
-    head = content[:summary_length]
-    cut = max(head.rfind(p) for p in ("。", "!", "?", "!", "?"))
-    if cut > 0:
-        head = head[: cut + 1]
-    return f"{head}…(原文共 {len(content)} 字)"
-
-
 async def summarize(
-    storage: StorageEngine, ctx: InterruptContext, payload: dict[str, Any]
+    storage: StorageEngine,
+    ctx: InterruptContext,
+    payload: dict[str, Any],
+    summarizer: Summarizer | None = None,
 ) -> dict:
-    """摘要任务 — 为超长 fragment 生成规则版摘要记忆.
+    """摘要任务 — 为超长 fragment 生成摘要记忆(规则或 LLM).
 
-    算法: content 长度 > max_length 的 fragment,截取前 summary_length 字
-    (优先句末标点截断)生成一条摘要记忆:
+    算法: content 长度 > max_length 的 fragment,生成一条摘要记忆:
     - fragment_id = 源 fragment_id + ":summary"(幂等:已存在则跳过)
     - content 带「【摘要】」前缀,entities/relations/importance 继承源
     - layer 与源一致(摘要是索引而非整合,层间流转归整合任务)
+
+    summarizer: 摘要后端(None = RuleSummarizer;LLM 后端由 server 层按
+    config.summarizer 注入,失败自降级规则版,任务永不因 LLM 故障失败)
 
     payload:
         scope / batch_size / step_delay: 同整合任务
         source_layer: 默认 "L1"
         max_length: 触发摘要的内容长度(默认 500)
-        summary_length: 摘要截取长度(默认 120)
+        summary_length: 摘要截取长度(默认 120,仅规则后端使用)
     """
     conn = storage.conn
     scope = payload.get("scope")
@@ -49,6 +44,8 @@ async def summarize(
     max_length = int(payload.get("max_length", 500))
     summary_length = int(payload.get("summary_length", 120))
     step_delay = float(payload.get("step_delay", 0.0))
+    # 注入后端优先;默认规则后端的截取长度沿用 payload(历史行为)
+    summarizer = summarizer or RuleSummarizer(summary_length)
 
     where, params = _scope_clause(
         scope, "layer = ? AND LENGTH(content) > ?", [source_layer, max_length]
@@ -87,7 +84,7 @@ async def summarize(
                 stats["skipped"] += 1
                 continue
             existing.add(summary_fid)  # 同批内重复 fragment_id 幂等(同原逐行语义)
-            head = _rule_summary(row["content"], summary_length)
+            head = await summarizer.summarize(row["content"])
             now = to_iso(now_utc())
             new_id = generate_id()
             insert_rows.append(

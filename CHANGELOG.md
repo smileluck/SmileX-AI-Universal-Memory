@@ -8,6 +8,21 @@
 
 ### Added
 
+- **LLM 摘要压缩(P3 演进路径,默认规则版)**: 新可选组件
+  `memory/summarizer.py`(与 embedder/extractor 同款 Protocol 模式)—
+  `Summarizer` Protocol + `RuleSummarizer`(原任务内联规则原样迁入,行为
+  逐字一致)+ `LLMSummarizer`(OpenAI 兼容,env
+  `SMILEX_SUMMARIZE_API_KEY/BASE_URL/MODEL`,temperature 0,GLM 系模型
+  自动附 `{"thinking":{"type":"disabled"}}` 防推理吃 token);降级语义:
+  无 key/缺包/调用失败一律回退规则摘要,绝不抛(调度器会删 FAILED 任务的
+  checkpoint,摘要任务必须自愈)。`summarize` 调度任务接受后端注入,
+  幂等键 `:summary`/字段继承/checkpoint 机制不变;
+  `ServerConfig.summarizer = rule | llm`,app lifespan 装配
+- **面板运行告警可视化**: 概览页新增「运行告警」区(告警 badge 按严重度
+  着色,空时显示"无告警";附队列深度/执行中任务/巡检状态元信息行)—
+  消费 `/api/health` 已有的 alerts/scheduler/db 字段,auth 裁剪载荷下
+  安全跳过
+
 - **HTTP API Key 鉴权(§15.4,默认关闭)**: `server/auth.py` 中间件挂主 app
   最外层,单点覆盖 MCP / /api/* / /metrics;双方案取 key
   (`Authorization: Bearer` 或 `X-API-Key`),`hmac.compare_digest` 恒时比较;

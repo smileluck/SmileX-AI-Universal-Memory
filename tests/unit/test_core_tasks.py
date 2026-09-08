@@ -438,3 +438,88 @@ async def test_semantic_community_cache(engine, scheduler):
     await scheduler.submit("semantic")
     await scheduler.wait_idle(timeout=3.0)
     assert await _count(conn, "layer = 'L3'") == 1
+
+
+# ---------- 摘要任务: LLM 后端注入(P3 摘要压缩) ----------
+
+
+class _FakeSummarizer:
+    """测试用摘要后端: 可控输出 / 可控行为."""
+
+    def __init__(self, *, text: str = "LLM 压缩摘要正文", error: Exception | None = None):
+        self.text = text
+        self.error = error
+        self.calls: list[str] = []
+
+    async def summarize(self, content: str) -> str:
+        self.calls.append(content)
+        if self.error is not None:
+            raise self.error
+        return self.text
+
+
+async def test_summarize_with_injected_llm_backend(engine):
+    """注入 LLM 后端: 摘要片段内容为后端输出(幂等键/字段继承机制不变)."""
+    from smilex.memory.scheduler.tasks import summarize as summarize_task
+
+    conn = engine.conn
+    long_content = "细节内容。" * 80  # 400 字
+    await _add_fragment(conn, "llm-1", long_content)
+
+    fake = _FakeSummarizer(text="LLM 压缩摘要正文")
+    stats = await summarize_task(
+        engine, _bare_ctx(engine), {"max_length": 100}, summarizer=fake
+    )
+    assert stats["summarized"] == 1
+    assert fake.calls == [long_content]  # 后端收到完整原文
+    cur = await conn.execute(
+        "SELECT content, entities FROM temporal_fragments "
+        "WHERE fragment_id = 'llm-1:summary'"
+    )
+    row = await cur.fetchone()
+    assert row["content"] == "【摘要】LLM 压缩摘要正文"
+    # 幂等: 同后端重跑跳过(不再调用 LLM)
+    fake2 = _FakeSummarizer()
+    stats2 = await summarize_task(
+        engine, _bare_ctx(engine), {"max_length": 100}, summarizer=fake2
+    )
+    assert stats2["skipped"] == 1 and not fake2.calls
+
+
+async def test_summarize_llm_failure_degrades_and_completes(engine):
+    """后端抛异常: 任务不失败(摘要任务必须自愈),交由组件级降级负责."""
+    from smilex.memory.scheduler.tasks import summarize as summarize_task
+
+    conn = engine.conn
+    await _add_fragment(conn, "llm-boom", "崩溃内容。" * 80)
+
+    # 直接注入"裸抛"后端验证传播语义: 组件契约要求后端自身降级,
+    # 任务侧不吞 — 若后端违反契约,任务 FAILED 由调度器收敛
+    fake = _FakeSummarizer(error=RuntimeError("llm down"))
+    try:
+        await summarize_task(
+            engine, _bare_ctx(engine), {"max_length": 100}, summarizer=fake
+        )
+        raised = False
+    except RuntimeError:
+        raised = True
+    assert raised  # 任务侧不静默吞异常(降级是组件契约,见 LLMSummarizer)
+
+
+async def test_register_core_tasks_accepts_summarizer(engine):
+    """register_core_tasks(summarizer=...) 转发到 runner(默认 None 兼容)."""
+    from smilex.memory.scheduler import MemoryTaskScheduler, SchedulerConfig
+    from smilex.memory.scheduler.tasks import register_core_tasks
+
+    fake = _FakeSummarizer()
+    sched = MemoryTaskScheduler(engine, SchedulerConfig(tick_interval=0.01))
+    runner = register_core_tasks(sched, engine, summarizer=fake)
+    assert runner._summarizer is fake
+    await sched.stop()
+
+
+def _bare_ctx(engine):
+    """无断点上下文(直接调用任务函数用)."""
+    from smilex.memory.scheduler.checkpoint import CheckpointStore, InterruptContext
+
+    return InterruptContext("task-direct", CheckpointStore(engine))

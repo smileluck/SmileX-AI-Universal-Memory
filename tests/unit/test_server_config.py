@@ -161,3 +161,8 @@ def test_repo_example_auth_keys_commented():
         stripped = line.strip()
         assert not stripped.startswith("api_key:"), "api_key 不应有生效值"
         assert not stripped.startswith("db_encryption_key:")
+
+
+def test_summarizer_defaults_rule():
+    config = ServerConfig()
+    assert config.summarizer == "rule"

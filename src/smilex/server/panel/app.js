@@ -93,6 +93,7 @@ async function loadHealth() {
   const pill = $("#health-pill");
   try {
     const d = await getJSON("/api/health");
+    renderAlerts(d);
     if (d.auth === "required") {
       // 服务启用了 API Key 且当前 key 缺失/无效: health 只回裁剪载荷
       pill.classList.add("bad");
@@ -117,6 +118,39 @@ async function loadHealth() {
       pill.innerHTML = `<span class="dot"></span>连接失败`;
       pill.title = String(e);
     }
+  }
+}
+
+/* 运行告警 / 队列深度 / 巡检状态(§15.3;auth 裁剪载荷下字段缺失则跳过) */
+
+function renderAlerts(d) {
+  const box = $("#alerts");
+  const meta = $("#runtime-meta");
+  if (!box) return;
+  const alerts = Array.isArray(d.alerts) ? d.alerts : null;
+  if (alerts === null) {  // 裁剪载荷(未授权): 不渲染,避免误导
+    box.innerHTML = `<span class="bdg dim">需授权</span>`;
+    if (meta) meta.textContent = "";
+    return;
+  }
+  if (!alerts.length) {
+    box.innerHTML = `<span class="bdg ok">无告警</span>`;
+  } else {
+    box.innerHTML = alerts.map(a =>
+      `<span class="bdg ${a.severity === "critical" ? "crit" : "warn"}" ` +
+      `title="${esc(a.detail || "")}">${esc(a.name)}</span>`
+    ).join("");
+  }
+  if (meta) {
+    const s = d.scheduler || {};
+    const parts = [];
+    if (s.queue_depth !== null && s.queue_depth !== undefined)
+      parts.push(`队列深度 ${s.queue_depth}`);
+    if (s.current) parts.push(`执行中 ${s.current}`);
+    const integ = d.db && d.db.integrity;
+    if (integ) parts.push(integ.ok ? "巡检正常" : "巡检异常");
+    else parts.push("未巡检");
+    meta.textContent = parts.join(" · ");
   }
 }
 

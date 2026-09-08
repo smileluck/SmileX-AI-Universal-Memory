@@ -132,6 +132,7 @@ smilex-memory doctor
 | `embedder` | `hash` | 嵌入器:`hash` 零依赖本地 / `sentence-transformers` 语义检索([embedding] extras,首启下载模型) |
 | `reranker` | `noop` | 重排序器:`noop` / `cross-encoder` 精排([rerank] extras) |
 | `fact_extractor` | `passthrough` | 事实抽取:`passthrough` 原文入库 / `llm` 写入时抽结构化事实([llm] extras,见下方环境变量) |
+| `summarizer` | `rule` | 摘要压缩:`rule` 规则截取 / `llm` 调度任务生成 LLM 摘要([llm] extras + `SMILEX_SUMMARIZE_*`,失败自动降级规则) |
 | `token_budget` | `4000` | 召回 token 预算(`memory_recall` 按此裁剪返回内容) |
 | `enable_scheduler` | `true` | serve 进程内核心调度任务(遗忘衰减 / 语义 / 摘要 / 因果 / 巩固 + 每日 SQLite 巡检);stdio 模式不适用 |
 | `metrics` | `true` | `GET /metrics` 指标端点(Prometheus 文本格式,零依赖) |
@@ -147,6 +148,8 @@ smilex-memory doctor
 `SMILEX_EXTRACT_API_KEY`(必填,缺失时抽取静默降级)、
 `SMILEX_EXTRACT_BASE_URL`(可选,OpenAI 兼容代理 / 私有网关)、
 `SMILEX_EXTRACT_MODEL`(模型名,默认 `glm-4.5-flash`)。
+`summarizer: llm` 同理用 `SMILEX_SUMMARIZE_API_KEY / _BASE_URL / _MODEL`
+(与 EXTRACT 三件套同形状,可用同一网关不同模型)。
 
 常驻自启动注册脚本(登录后自动 `smilex-memory serve`,支持
 `SMILEX_SERVE_ARGS="--config ~/.smilex/config.yaml --port 9000"` 传参):
@@ -156,7 +159,7 @@ smilex-memory doctor
 - macOS: `scripts/register-service-macos.sh`(`--uninstall` 卸载,launchd)
 
 Web 面板(`http://127.0.0.1:8765/`)为只读,零依赖纯静态、可离线:
-概览(统计卡 / L0-L3 分层叠条 / scope 分布 / 调度任务进度,15s 自动刷新)、
+概览(统计卡 / L0-L3 分层叠条 / scope 分布 / 运行告警 / 调度任务进度,15s 自动刷新)、
 记忆浏览(FTS5 关键词搜索 + 类型/层/scope 过滤,行点击看全字段详情)、
 召回测试(可调 top_k / session_id / token_budget,来源含分数条与片段);
 另提供 `/api/health` 健康检查。写入统一走 MCP 工具
