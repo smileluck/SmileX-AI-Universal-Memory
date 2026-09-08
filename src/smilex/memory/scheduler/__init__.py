@@ -23,6 +23,7 @@ from .scheduler import MemoryTaskScheduler, SchedulerConfig
 from .tasks import (
     CORE_TASK_NAMES,
     TASK_DB_INTEGRITY,
+    TASK_DEDUP,
     CoreTaskConfig,
     CoreTaskRunner,
     register_core_tasks,
@@ -51,6 +52,7 @@ __all__ = [
     "ProjectBootstrap",
     "SchedulerConfig",
     "TASK_DB_INTEGRITY",
+    "TASK_DEDUP",
     "SchedulerTask",
     "SeedInjector",
     "TaskDefinition",

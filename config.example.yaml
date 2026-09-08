@@ -56,8 +56,13 @@ token_budget: 4000
 # ---------- 调度 ----------
 
 # serve 进程内是否跑核心调度任务
-# (遗忘衰减 / 语义 / 摘要 / 因果 / 巩固 + 每日 SQLite 完整性巡检;stdio 模式不适用,调试可关)
+# (遗忘衰减 / 语义 / 摘要 / 因果 / 巩固 + 每日 SQLite 完整性巡检 + 每日近重复合并;
+#  stdio 模式不适用,调试可关)
 enable_scheduler: true
+
+# 检索反馈闭环(记忆主动优化): recall 命中即累加 access_count/last_accessed_at,
+# forget 据此"使用即续命(衰减锚点重置)+ 常用即升值(log10 加成,上限 3x)"
+access_tracking: true
 
 # ---------- 可观测性(全部安全默认值) ----------
 

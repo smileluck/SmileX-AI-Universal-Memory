@@ -8,11 +8,15 @@ _require_initialized)由宿主类提供.
 from __future__ import annotations
 
 from dataclasses import replace
+from typing import TYPE_CHECKING
 
 from ..memory.contracts import MemoryRef, RecallRequest, RecallResponse
 from ..memory.models import MemoryLayer, MemoryScope, ScopeFilter
 from ..memory.storage.storage_engine import scope_path
 from ..utils.timeutil import now_utc, to_iso
+
+if TYPE_CHECKING:
+    from ..memory.storage.storage_engine import StorageEngine
 
 # ContextSource.layer("L0"/"L1"/"L2") → MemoryLayer 枚举
 _LAYER_MAP: dict[str, MemoryLayer] = {
@@ -46,6 +50,11 @@ def _time_range_tuple(request: RecallRequest) -> tuple[str, str] | None:
 
 class _RecallPathMixin:
     """M.4 检索路径(组合进 MemoryMiddleware)."""
+
+    # 宿主类(MemoryMiddleware)提供的共享状态注解(存量 mixin 模式,
+    # 此处仅为类型可见性;赋值在宿主 __init__)
+    _track_access: bool
+    _engine: StorageEngine
 
     # ==================== M.4 检索 ====================
 
@@ -101,12 +110,51 @@ class _RecallPathMixin:
                 sources.extend(archived_refs)
                 token_count += archived_tokens
         layers_used = list(dict.fromkeys(ref.layer for ref in sources))
+        if self._track_access:
+            await self._record_access([ref.id for ref in sources])
         return RecallResponse(
             context=context_text,
             sources=sources,
             layers_used=layers_used,
             token_count=token_count,
         )
+
+    async def _record_access(self, source_ids: list[str]) -> None:
+        """检索反馈闭环(§ 主动优化): 本次召回命中的 fragment 记一次访问.
+
+        - source id 是混合命名空间(L1 向量通道含实体/三元组 id,L2 为三元组
+          id,L0 为未晋升内存 id)——先 IN 过滤出真实 fragment 行,其余 UPDATE
+          影响 0 行无害;L0 已晋升的 id 与 fragment id 相同,自然命中
+        - 计数落库供 forget(续命+升值)与 dedup(合并时求和)消费;
+          失败只降级不抛(检索路径不能因统计写失败而断)
+        """
+        unique_ids = list(dict.fromkeys(source_ids))
+        if not unique_ids:
+            return
+        try:
+            conn = self._engine.conn
+            placeholders = ",".join("?" for _ in unique_ids)
+            cur = await conn.execute(
+                "SELECT id FROM temporal_fragments WHERE id IN "
+                f"({placeholders})",
+                unique_ids,
+            )
+            fragment_ids = [str(r["id"]) for r in await cur.fetchall()]
+            if not fragment_ids:
+                return
+            ph = ",".join("?" for _ in fragment_ids)
+            await conn.execute(
+                "UPDATE temporal_fragments SET access_count = access_count + 1, "
+                f"last_accessed_at = ? WHERE id IN ({ph})",
+                [to_iso(now_utc()), *fragment_ids],
+            )
+            await conn.commit()
+        except Exception as exc:  # noqa: BLE001 — 统计写失败不影响检索结果
+            from ..memory.observability import get_logger
+
+            get_logger("recall").warning(
+                "access_tracking_failed", error=str(exc)
+            )
 
     async def _recall_archived(
         self, request: RecallRequest, scope_filter: ScopeFilter

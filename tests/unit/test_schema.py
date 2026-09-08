@@ -363,3 +363,11 @@ def test_virtual_table_vec0_knn(db_with_schema):
     assert len(rows) == 2
     assert rows[0][0] == 1  # vector_id=1 距离最近(应该为 0)
     assert rows[1][0] == 3  # vector_id=3 接近 v1
+
+
+def test_access_stat_columns(db_with_schema):
+    """014: temporal_fragments 带 access_count/last_accessed_at(检索反馈闭环)."""
+    cur = db_with_schema.execute("PRAGMA table_info(temporal_fragments)")
+    columns = {row[1] for row in cur.fetchall()}
+    assert "access_count" in columns
+    assert "last_accessed_at" in columns

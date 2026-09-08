@@ -35,12 +35,14 @@ from ._common import (
     TASK_CAUSAL,
     TASK_CONSOLIDATE,
     TASK_DB_INTEGRITY,
+    TASK_DEDUP,
     TASK_FORGET,
     TASK_SEMANTIC,
     TASK_SUMMARIZE,
 )
 from .causal import causal
 from .consolidate import consolidate
+from .dedup import dedup
 from .forget import forget
 from .integrity import db_integrity
 from .semantic import semantic
@@ -82,6 +84,9 @@ class CoreTaskRunner:
     async def db_integrity(self, ctx: InterruptContext, payload: dict[str, Any]) -> dict:
         return await db_integrity(self._storage, ctx, payload)
 
+    async def dedup(self, ctx: InterruptContext, payload: dict[str, Any]) -> dict:
+        return await dedup(self._storage, ctx, payload)
+
 
 @dataclass
 class CoreTaskConfig:
@@ -100,6 +105,7 @@ class CoreTaskConfig:
     summarize_interval_seconds: float = 1800.0  # 每 30 分钟摘要
     semantic_interval_seconds: float = 7200.0  # 每 2 小时图维护
     db_integrity_interval_seconds: float = 86400.0  # 每日 SQLite 巡检(§15.3)
+    dedup_interval_seconds: float = 86400.0  # 每日近重复合并(§ 主动优化)
 
     l1_pressure: Any = None  # Callable[[], bool]: L1 使用率 > 80%(§8.3 记忆压力)
     memory_pressure_cooldown: float = 300.0  # 5 分钟
@@ -179,6 +185,15 @@ def register_core_tasks(
     )
     scheduler.register(
         TaskDefinition(
+            name=TASK_DEDUP,
+            run=runner.dedup,
+            priority=TaskPriority.LOW,
+            interruptible=True,
+            description="近重复合并(FTS 候选 + bigram Jaccard ≥ 0.7,访问计数求和)",
+        )
+    )
+    scheduler.register(
+        TaskDefinition(
             name=TASK_DB_INTEGRITY,
             run=runner.db_integrity,
             priority=TaskPriority.LOW,
@@ -211,6 +226,11 @@ def register_core_tasks(
         scheduler.add_time_trigger(
             TASK_DB_INTEGRITY,
             config.db_integrity_interval_seconds,
+            priority=TaskPriority.LOW,
+        )
+        scheduler.add_time_trigger(
+            TASK_DEDUP,
+            config.dedup_interval_seconds,
             priority=TaskPriority.LOW,
         )
 
@@ -257,6 +277,7 @@ __all__ = [
     "TASK_CAUSAL",
     "TASK_CONSOLIDATE",
     "TASK_DB_INTEGRITY",
+    "TASK_DEDUP",
     "TASK_FORGET",
     "TASK_SEMANTIC",
     "TASK_SUMMARIZE",

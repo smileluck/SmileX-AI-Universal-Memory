@@ -133,6 +133,7 @@ smilex-memory doctor
 | `reranker` | `noop` | 重排序器:`noop` / `cross-encoder` 精排([rerank] extras) |
 | `fact_extractor` | `passthrough` | 事实抽取:`passthrough` 原文入库 / `llm` 写入时抽结构化事实([llm] extras,见下方环境变量) |
 | `summarizer` | `rule` | 摘要压缩:`rule` 规则截取 / `llm` 调度任务生成 LLM 摘要([llm] extras + `SMILEX_SUMMARIZE_*`,失败自动降级规则) |
+| `access_tracking` | `true` | 检索反馈闭环:recall 命中即累加访问计数(见「记忆主动优化」) |
 | `token_budget` | `4000` | 召回 token 预算(`memory_recall` 按此裁剪返回内容) |
 | `enable_scheduler` | `true` | serve 进程内核心调度任务(遗忘衰减 / 语义 / 摘要 / 因果 / 巩固 + 每日 SQLite 巡检);stdio 模式不适用 |
 | `metrics` | `true` | `GET /metrics` 指标端点(Prometheus 文本格式,零依赖) |
@@ -165,6 +166,26 @@ Web 面板(`http://127.0.0.1:8765/`)为只读,零依赖纯静态、可离线:
 另提供 `/api/health` 健康检查。写入统一走 MCP 工具
 (`memory_recall` / `memory_write` / `memory_init_project` / `memory_stats`)。
 详见 [Server 层设计](docs/design/modules/13-server-layer.md)。
+
+### 记忆主动优化(检索反馈闭环 + 近重复合并)
+
+参照 [DeepSeek Harness dsh-agent-memory](https://github.com/deepseek-ai/deepseek-harness/discussions/1448)
+的治理模式:**确定性规则 + 使用反馈**,零 LLM 零新增依赖,默认开启。
+
+- **使用即续命**:recall 命中的 fragment 自动累加 `access_count`/`last_accessed_at`
+  (schema 014),遗忘任务的衰减锚点从"最后更新时间"改为"更新与最近访问的较新者"——
+  被用过的记忆从使用时刻重新衰减,不再被时间冲走
+- **常用即升值**:保留分乘 `min(3, 1 + log10(1 + access_count))`,高频记忆最多
+  3 倍存活加成
+- **近重复合并**(第 7 个核心调度任务 `dedup`,每日 LOW):同 scope 同层的近重复
+  条目自动合并——FTS trigram 短语找候选 + 字符 bigram Jaccard ≥ 0.7(DSH 中文
+  校准值)确认;幸存者为较早创建者,吸收重复行的访问计数(求和)/时间区间
+  (并集)/实体(并集)/重要度(max),重复行连同向量删除。写得越多重复越多的
+  问题由库自己收敛
+- 关闭反馈:`access_tracking: false`(recall 回到纯只读);dedup 阈值可经
+  `scheduler.submit("dedup", payload={"threshold": 0.8})` 调整
+- 后续路线(参照 DSH 差距分析):superseded 显式化(LWW 覆盖留痕)、容量上限
+  与删除守卫、lessonize 教训写入协议
 
 ### API Key 鉴权与库文件加密(§15.4)
 

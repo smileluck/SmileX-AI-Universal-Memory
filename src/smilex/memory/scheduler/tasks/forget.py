@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 from typing import TYPE_CHECKING, Any
 
 from ....utils.timeutil import from_iso, now_utc, to_iso
@@ -18,16 +19,19 @@ async def forget(
 ) -> dict:
     """遗忘任务 — 淘汰或降权过期、低价值的记忆.
 
-    保留分(规则版,importance + 时间衰减):
+    保留分(规则版,§ 主动优化一期引入访问反馈):
         score = importance * 0.5 ** (age_days / half_life_days)
-        age_days 取 updated_at 距今天数
+                      * min(3, 1 + log10(1 + access_count))
+        age_days 取 max(updated_at, last_accessed_at) 距今天数 —
+        被召回使用过的记忆从使用时刻重新衰减(使用即续命);
+        访问计数给最多 3 倍存活加成(常用即升值)。
     判定:
     - time_end 已过(PromotionManager 将 expires_at 写入 time_end)→ 直接淘汰
     - score < threshold → 删除(默认)或降权(demote=True 时 importance=score)
     - 其余保留
 
-    注: temporal_fragments 无 access_count 列(Layer 0 access_count 不落库),
-    访问热度暂由 importance 承载,不改 schema.
+    注: access_count/last_accessed_at 由 recall 命中时累加(schema 014,
+    track_access 开关控制);未开启反馈时两列为默认值,公式退化为历史行为。
 
     payload:
         scope / batch_size / step_delay: 同整合任务
@@ -68,7 +72,8 @@ async def forget(
 
     while True:
         cur = await conn.execute(
-            "SELECT id, importance, time_end, updated_at FROM temporal_fragments "
+            "SELECT id, importance, time_end, updated_at, access_count, "
+            "last_accessed_at FROM temporal_fragments "
             f"WHERE {where} AND id > ? ORDER BY id LIMIT ?",
             [*params, last_id, batch_size],
         )
@@ -81,8 +86,16 @@ async def forget(
         for row in rows:
             stats["scanned"] += 1
             expired = row["time_end"] is not None and from_iso(row["time_end"]) < now
-            age_days = max(0.0, (now - from_iso(row["updated_at"])).total_seconds() / 86400)
+            # 使用即续命: 衰减锚点取更新时间与最近访问时间的较新者
+            anchors = [from_iso(row["updated_at"])]
+            if row["last_accessed_at"]:
+                anchors.append(from_iso(row["last_accessed_at"]))
+            age_days = max(
+                0.0, (now - max(anchors)).total_seconds() / 86400
+            )
             score = float(row["importance"]) * 0.5 ** (age_days / half_life_days)
+            # 常用即升值: 访问计数给最多 3 倍存活加成
+            score *= min(3.0, 1.0 + math.log10(1 + int(row["access_count"] or 0)))
             if expired and forget_expired:
                 delete_ids.append(row["id"])
                 stats["expired"] += 1

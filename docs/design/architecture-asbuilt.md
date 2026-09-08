@@ -277,7 +277,7 @@ server 层 config.toml 对应开关:`embedder` / `reranker` / `fact_extractor` /
 
 ## 7. 存储层
 
-单文件 SQLite,`SCHEMA_VERSION = 13`。引擎
+单文件 SQLite,`SCHEMA_VERSION = 14`。引擎
 (`storage/sqlite_engine.py`):aiosqlite + `DEFAULT_PRAGMAS`
 (WAL / synchronous=NORMAL / temp\_store=MEMORY / mmap 256MB /
 cache 64MB / foreign\_keys / busy\_timeout 5000ms);迁移按
@@ -297,6 +297,7 @@ cache 64MB / foreign\_keys / busy\_timeout 5000ms);迁移按
 | 011     | 归档 + 谓词字典                  | Archiver 冷热分层                                                              |
 | 012     | 性能索引                       | <br />                                                                     |
 | 013     | fts\_fragments             | FTS5 external-content,trigram;INSERT/UPDATE/DELETE 触发器保持同步;`rebuild` 回填老数据 |
+| 014     | access\_stats               | temporal_fragments 增 access_count/last_accessed_at(检索反馈闭环;FTS 触发器只在 UPDATE OF content 联动,计数不扰索引) |
 
 查询模块(`queries/`,全部接收 `aiosqlite.Connection`,事务由调用方管理):
 
@@ -327,14 +328,15 @@ cache 64MB / foreign\_keys / busy\_timeout 5000ms);迁移按
 主动让出,进度+步号+游标存 checkpoints 表,msgpack 编码)/
 PRIORITY\_INHERITANCE;`resume` 从断点续跑。
 
-5 个核心任务(`scheduler/tasks/` 包: consolidate/forget/summarize/causal/
+核心任务(`scheduler/tasks/` 包: consolidate/forget/summarize/causal/
 semantic 各一模块 + `_common.py` 共享子句,`__init__.py` 的 `CoreTaskRunner`
 为薄门面;`register_core_tasks` 配默认触发器):
 
 | 任务          | 行为                                                                                                    | 关键参数                              |
 | ----------- | ----------------------------------------------------------------------------------------------------- | --------------------------------- |
 | consolidate | L1 fragments 按 entity/scope 分组聚合,固化写入 L2(triples)                                                     | 分组 flush(H1)                      |
-| forget      | 留存分 `score = importance × 0.5^(age_days/half_life)`;`score < threshold` → 删除(默认)或降权(importance=score) | half\_life\_days=30,threshold=0.1 |
+| forget      | 留存分 `score = importance × 0.5^(age/half_life) × min(3, 1+log10(1+access_count))`,age 锚点取 max(updated\_at, last\_accessed\_at)(使用即续命+常用即升值);低于 threshold → 删除(默认)或降权 | half\_life\_days=30,threshold=0.1 |
+| dedup       | 近重复合并(§ 主动优化): FTS trigram 短语找同 scope/layer 候选 + 字符 bigram Jaccard ≥ 0.7 确认;幸存者=较早 created\_at,吸收访问计数/时间区间/实体;重复行连同向量删除 | 每日 LOW,threshold=0.7,min\_length=12 |
 | summarize   | 规则式摘要(非 LLM),summary\_length 可调                                                                       | <br />                            |
 | causal      | 遍历 predecessor\_id 链维护 causal\_chains 表                                                               | <br />                            |
 | semantic    | NetworkX 构实体图,预计算连通分量("语义社区")缓存                                                                       | <br />                            |
@@ -566,7 +568,7 @@ token_budget=4000 / enable_scheduler=true`,CLI 可覆盖 db/host/port):
 | 抢占(preempt) | 中断运行中任务的策略族:NONE/IMMEDIATE/GRACEFUL/COOPERATIVE/PRIORITY_INHERITANCE |
 | COOPERATIVE / checkpoint() | 协作式让出:任务在安全点主动存断点(进度+步号+msgpack cursor)后停下,可 resume 续跑 |
 | consolidate | 核心任务:L1 碎片按 entity/scope 聚合固化成 L2 三元组 |
-| forget / 半衰期 | 核心任务:留存分 = importance × 0.5^(age/30 天),低于 0.1 删除或降权 |
+| forget / 半衰期 | 核心任务:留存分 = importance × 0.5^(age/30 天) × 访问加成(≤3x),age 锚点含最近访问;低于 0.1 删除或降权 |
 | summarize | 核心任务:摘要压缩(默认规则式;summarizer=llm 注入 LLM 后端,见 §6) |
 | semantic | 核心任务:NetworkX 构实体图、预计算连通分量("语义社区")缓存 |
 | bootstrap / 冷启动 | 新项目初始化包:向导问答 + README 解析 + 模板 + 种子注入 + 批量导入;MCP `memory_init_project(project_path=...)` 与 CLI `init --scan` 一键完成"扫描并生成初始记忆"(README/git/markdown/源码),同名项目复用 scope 幂等可重跑 |

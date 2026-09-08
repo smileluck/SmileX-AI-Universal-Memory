@@ -166,3 +166,8 @@ def test_repo_example_auth_keys_commented():
 def test_summarizer_defaults_rule():
     config = ServerConfig()
     assert config.summarizer == "rule"
+
+
+def test_access_tracking_default_on():
+    config = ServerConfig()
+    assert config.access_tracking is True

@@ -86,6 +86,9 @@ class MemoryMiddleware(_WritePathMixin, _RecallPathMixin, _BootstrapFacadeMixin)
         pii_masker: 写入前 PII 脱敏器(None 时 NoopPIIMasker 直通 —
             记忆系统常需记住用户联系方式,默认不脱敏;正则后端见
             smilex.memory.pii)
+        track_access: 检索反馈闭环(默认 True)— recall 命中的 fragment
+            累加 access_count/last_accessed_at,forget 任务据此续命/升值
+            (§ 主动优化;关闭则 recall 保持纯只读)
     """
 
     def __init__(
@@ -102,6 +105,7 @@ class MemoryMiddleware(_WritePathMixin, _RecallPathMixin, _BootstrapFacadeMixin)
         fact_extractor: FactExtractor | None = None,
         facts_bypass_l0: bool = True,
         pii_masker: PIIMasker | None = None,
+        track_access: bool = True,
     ) -> None:
         self._owns_engine = engine is None
         self._engine = engine or StorageEngine(db_path)
@@ -124,6 +128,7 @@ class MemoryMiddleware(_WritePathMixin, _RecallPathMixin, _BootstrapFacadeMixin)
         self._extractor = fact_extractor or PassThroughExtractor()
         self._facts_bypass_l0 = facts_bypass_l0
         self._pii = pii_masker or NoopPIIMasker()
+        self._track_access = track_access
         self._snapshots = L0SnapshotStore(self._engine)
         self._bootstrap: ProjectBootstrap | None = None
         # 最近一次 initialize_project 的项目 ID,write 的 scope_id 缺省值

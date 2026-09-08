@@ -60,6 +60,8 @@ class ServerConfig(BaseModel):
     summarizer: str = "rule"
     token_budget: int = Field(default=4000, gt=0)
     enable_scheduler: bool = True
+    # 检索反馈闭环(§ 主动优化): recall 命中即累加访问计数,forget 据此续命/升值
+    access_tracking: bool = True
     # ---- 可观测性与安全(§15.3/§15.4) ----
     metrics: bool = True  # GET /metrics(Prometheus 文本格式,零依赖实现)
     audit: bool = True  # 变更事件 JSONL 审计(默认库文件旁 audit-<db>.jsonl)

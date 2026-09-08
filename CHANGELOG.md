@@ -8,6 +8,25 @@
 
 ### Added
 
+- **记忆主动优化一期(检索反馈闭环 + 近重复合并,参照 DeepSeek Harness
+  dsh-agent-memory 治理模式;确定性规则,零 LLM 零新增依赖)**:
+  - schema 014: temporal_fragments 新增 `access_count`/`last_accessed_at`
+    (ALTER,既有库升级无损;FTS 触发器只在 UPDATE OF content 联动,计数不扰索引)
+  - 检索反馈闭环(默认开启,`access_tracking: false` 可关): recall 命中的
+    fragment 自动累加访问计数 — source id 为混合命名空间(L1 向量通道含
+    实体/三元组 id),先 IN 过滤出真实 fragment 行再批量 UPDATE,统计写失败
+    只降级不抛;`MemoryMiddleware(track_access=)` / ServerConfig 透传
+  - forget 任务公式扩展: **使用即续命**(衰减锚点从 updated_at 改为
+    max(updated_at, last_accessed_at))+ **常用即升值**
+    (`× min(3, 1+log10(1+access_count))`),无访问数据时行为与历史一致
+  - 第 7 个核心任务 `dedup`(每日 LOW): 同 scope/layer 近重复合并 —
+    FTS trigram 短语找候选 + 字符 bigram Jaccard ≥ 0.7(DSH 中文校准值)
+    确认;幸存者 = 较早 created_at,吸收访问计数(求和)/时间区间(并集)/
+    实体(保序并集)/importance(max);重复行先清向量(vector_links FK
+    引用热表)再删除;keyset 分页 + checkpoint 断点续传,幂等可重跑
+- 面板零成本可见: `/api/memory/{id}` 详情自动展示新列(access_count/
+  last_accessed_at)
+
 - **LLM 摘要压缩(P3 演进路径,默认规则版)**: 新可选组件
   `memory/summarizer.py`(与 embedder/extractor 同款 Protocol 模式)—
   `Summarizer` Protocol + `RuleSummarizer`(原任务内联规则原样迁入,行为

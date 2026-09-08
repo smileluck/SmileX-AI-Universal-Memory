@@ -160,6 +160,7 @@ def build_middleware(
             reranker=reranker,
             fact_extractor=extractor,
             pii_masker=pii_masker,
+            track_access=config.access_tracking,
         )
     wrapped = TelemetryMemoryMiddleware(
         resolved_db,
@@ -168,6 +169,7 @@ def build_middleware(
         reranker=reranker,
         fact_extractor=extractor,
         pii_masker=pii_masker,
+        track_access=config.access_tracking,
         telemetry=telemetry,
     )
     wrapped.telemetry_channel = "mcp"
