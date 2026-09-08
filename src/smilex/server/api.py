@@ -57,6 +57,9 @@ class RecallTestBody(BaseModel):
     session_id: str = "panel-debug"
     top_k: int = 10
     token_budget: int | None = None
+    entity: str | None = None  # 实体名/归一化 ID/ULID → 图谱策略聚焦
+    time_start: str | None = None  # ISO 时间对 → 时序策略聚焦
+    time_end: str | None = None
 
 
 def _fts_phrase(q: str) -> str:
@@ -336,10 +339,21 @@ def create_api_router(service: MemoryService) -> APIRouter:
     @router.post("/recall-test")
     async def recall_test(body: RecallTestBody) -> dict[str, Any]:
         memory = await service.get()
+        # 聚焦参数与 MCP memory_recall 同语义: entity 解析为实体 ID 触发图谱策略,
+        # ISO 时间对触发时序策略(辅助函数与 mcp_server 共用,延迟导入避免硬依赖)
+        from .mcp_server import parse_time_range, resolve_entity_ref
+
+        entity_filter: str | None = None
+        if body.entity:
+            entity_filter = await resolve_entity_ref(
+                memory.engine.conn, body.entity
+            )
         start = time.monotonic()
         resp = await memory.recall(
             RecallRequest(
                 query=body.query,
+                time_range=parse_time_range(body.time_start, body.time_end),
+                entity_filter=entity_filter,
                 top_k=body.top_k,
                 token_budget=body.token_budget or service.config.token_budget,
             ),

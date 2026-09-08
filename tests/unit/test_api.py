@@ -78,6 +78,22 @@ def test_recall_test_endpoint(client):
     assert "context" in data and "elapsed_ms" in data
 
 
+def test_recall_test_focus_params(client):
+    """聚焦参数(entity/时间对)与 MCP memory_recall 同语义,未知实体安全降级."""
+    resp = client.post(
+        "/api/recall-test",
+        json={
+            "query": "测试查询",
+            "entity": "不存在的实体",
+            "time_start": "2025-01-01T00:00:00Z",
+            "time_end": "2025-12-31T00:00:00Z",
+        },
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "context" in data and "elapsed_ms" in data
+
+
 def test_tasks_endpoint(client):
     resp = client.get("/api/tasks")
     assert resp.status_code == 200

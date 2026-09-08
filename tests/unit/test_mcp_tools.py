@@ -86,6 +86,141 @@ async def test_recall_empty_db(service):
     assert resp["context"] == "" or resp["token_count"] == 0
 
 
+async def _seed_person_graph(service):
+    """直接落库一张小图(工具层测试种子,绕开写入路径的实体解析细节).
+
+    Alice ──knows──▶ Bob ──knows──▶ Carol(t2 带前驱 t1,供 causal 模式用)
+    Alice ──works_at──▶ Company X
+    """
+    memory = await service.get()
+    conn = memory.engine.conn
+    for eid, ename, name in [
+        ("e1", "person:alice", "Alice"),
+        ("e2", "person:bob", "Bob"),
+        ("e3", "person:carol", "Carol"),
+    ]:
+        await conn.execute(
+            "INSERT INTO entities(id, entity_id, entity_type, name, scope, valid_from)"
+            " VALUES (?, ?, 'person', ?, 'global', '2025-01-01T00:00:00.000000Z')",
+            (eid, ename, name),
+        )
+    for tid, sid, pred, oid, pred_of in [
+        ("t1", "e1", "knows", "e2", None),
+        ("t2", "e2", "knows", "e3", "t1"),
+        ("t3", "e1", "works_at", "e3", None),
+    ]:
+        await conn.execute(
+            "INSERT INTO triples(id, triple_id, subject_id, predicate, object_id, "
+            "scope, valid_from, relation_type, predecessor_id) "
+            "VALUES (?, ?, ?, ?, ?, 'global', '2025-01-01T00:00:00.000000Z', "
+            "'semantic', ?)",
+            (tid, f"tri_{tid}", sid, pred, oid, pred_of),
+        )
+    await conn.commit()
+
+
+async def test_recall_entity_focus(service):
+    """recall 的 entity 参数: 实体名解析为 ID → 图谱 N 度策略聚焦相关三元组."""
+    await _seed_person_graph(service)
+    server = create_mcp_server(service)
+    resp = await _call(
+        server, "memory_recall", {"query": "人际关系", "entity": "Alice"}
+    )
+    assert "knows" in resp["context"]
+    assert resp["layers_used"]
+
+
+async def test_recall_entity_not_found(service):
+    server = create_mcp_server(service)
+    with pytest.raises(Exception, match="未找到实体"):
+        await _call(
+            server, "memory_recall", {"query": "x", "entity": "不存在的人"}
+        )
+
+
+async def test_graph_query_path_mode(service):
+    """mode=path: 实体名解析 + 最短路径 + 节点名/边谓词装饰."""
+    await _seed_person_graph(service)
+    server = create_mcp_server(service)
+    resp = await _call(
+        server,
+        "memory_graph_query",
+        {"mode": "path", "src": "Alice", "dst": "Carol"},
+    )
+    assert resp["found"] is True
+    assert resp["depth"] == 1  # Alice ──works_at──▶ Carol 直达
+    assert [n["name"] for n in resp["nodes"]] == ["Alice", "Carol"]
+    assert resp["edges"][0]["predicate"] == "works_at"
+
+    # 限 semantic 之外的类型 → 无路可走
+    resp = await _call(
+        server,
+        "memory_graph_query",
+        {"mode": "path", "src": "Alice", "dst": "Carol",
+         "relation_types": "causal"},
+    )
+    assert resp["found"] is False
+
+    # 无路径的两点
+    resp = await _call(
+        server,
+        "memory_graph_query",
+        {"mode": "path", "src": "Carol", "dst": "Alice"},
+    )
+    assert resp["found"] is False
+
+
+async def test_graph_query_neighbors_mode(service):
+    """mode=neighbors: N 度关系带实体名装饰 + relation_types 过滤透传."""
+    await _seed_person_graph(service)
+    server = create_mcp_server(service)
+    resp = await _call(
+        server,
+        "memory_graph_query",
+        {"mode": "neighbors", "entity": "Alice", "max_depth": 2},
+    )
+    assert resp["entity"]["name"] == "Alice"
+    by_depth: dict[int, set[str]] = {}
+    for r in resp["relations"]:
+        by_depth.setdefault(r["depth"], set()).add(r["name"])
+    assert by_depth == {1: {"Bob", "Carol"}}
+
+    resp = await _call(
+        server,
+        "memory_graph_query",
+        {"mode": "neighbors", "entity": "Alice", "relation_types": "causal"},
+    )
+    assert resp["relations"] == []
+
+
+async def test_graph_query_causal_mode(service):
+    """mode=causal: 沿 predecessor 链向根因追溯,三元组带摘要装饰."""
+    await _seed_person_graph(service)
+    server = create_mcp_server(service)
+    resp = await _call(
+        server,
+        "memory_graph_query",
+        {"mode": "causal", "triple_id": "t2", "direction": "backward"},
+    )
+    assert [item["depth"] for item in resp["backward"]] == [0, 1]
+    assert resp["backward"][0]["triple"]["predicate"] == "knows"
+    assert resp["backward"][1]["triple"]["subject"] == "Alice"
+
+
+async def test_graph_query_bad_mode(service):
+    server = create_mcp_server(service)
+    with pytest.raises(Exception, match="mode"):
+        await _call(server, "memory_graph_query", {"mode": "bogus"})
+    with pytest.raises(Exception, match="src"):
+        await _call(server, "memory_graph_query", {"mode": "path"})
+    with pytest.raises(Exception, match="未找到实体"):
+        await _call(
+            server,
+            "memory_graph_query",
+            {"mode": "neighbors", "entity": "Nobody"},
+        )
+
+
 async def test_bad_scope_rejected(service):
     server = create_mcp_server(service)
     with pytest.raises(Exception, match="scope"):

@@ -32,6 +32,14 @@ def _split_path(path: str) -> list[str]:
     return [p for p in path.split(",") if p]
 
 
+def _relation_type_clause(relation_types: list[str] | None) -> tuple[str, list[str]]:
+    """relation_types 列表 → JOIN 用的 ` AND t.relation_type IN (...)` 片段."""
+    if not relation_types:
+        return "", []
+    placeholders = ",".join("?" for _ in relation_types)
+    return f" AND t.relation_type IN ({placeholders})", list(relation_types)
+
+
 async def find_path(
     conn: aiosqlite.Connection,
     src_id: str,
@@ -39,6 +47,7 @@ async def find_path(
     *,
     max_depth: int = 5,
     scope_filter: ScopeFilter | None = None,
+    relation_types: list[str] | None = None,
 ) -> dict | None:
     """查找从 src_id 到 dst_id 的最短路径(BFS via recursive CTE).
 
@@ -48,6 +57,9 @@ async def find_path(
         dst_id: 终点实体 ID
         max_depth: 最大深度(默认 5)
         scope_filter: 作用域过滤
+        relation_types: 只遍历这些 relation_type 的边
+            (causal/spatial/temporal/semantic/project_state/task_status/config);
+            None 遍历全部
 
     Returns:
         {"nodes": [...], "edges": [...], "depth": int} 或 None(无路径)
@@ -61,6 +73,7 @@ async def find_path(
 
     scope_clause, scope_params = build_scope_clause(scope_filter)
     scope_where = f" AND ({scope_clause})" if scope_clause else ""
+    type_where, type_params = _relation_type_clause(relation_types)
 
     sql = f"""
         WITH RECURSIVE bfs(node, depth, path_nodes, path_edges) AS (
@@ -76,7 +89,7 @@ async def find_path(
                 b.path_nodes || t.object_id || ',' AS path_nodes,
                 b.path_edges || t.id || ',' AS path_edges
             FROM bfs b
-            JOIN triples t ON t.subject_id = b.node{scope_where}
+            JOIN triples t ON t.subject_id = b.node{scope_where}{type_where}
             WHERE b.depth < ?
               AND t.valid_to IS NULL
               AND t.object_id IS NOT NULL
@@ -93,9 +106,10 @@ async def find_path(
     # 1. SELECT ? AS node            → src_id
     # 2. ',' || ? || ','             → src_id
     # 3. JOIN ... scope_where (?s)   → scope_params
-    # 4. WHERE b.depth < ?           → max_depth
-    # 5. WHERE node = ?              → dst_id
-    params: list = [src_id, src_id, *scope_params, max_depth, dst_id]
+    # 4. JOIN ... type_where (?s)    → type_params
+    # 5. WHERE b.depth < ?           → max_depth
+    # 6. WHERE node = ?              → dst_id
+    params: list = [src_id, src_id, *scope_params, *type_params, max_depth, dst_id]
 
     cursor = await conn.execute(sql, params)
     row = await cursor.fetchone()
@@ -117,6 +131,7 @@ async def find_n_degree_relations(
     max_depth: int = 2,
     scope_filter: ScopeFilter | None = None,
     include_paths: bool = True,
+    relation_types: list[str] | None = None,
 ) -> list[dict]:
     """查找 entity_id 的 N 度关系(BFS 到 depth N).
 
@@ -127,6 +142,7 @@ async def find_n_degree_relations(
         scope_filter: 作用域过滤
         include_paths: 是否返回路径明细(M8)。False 时只返回
             entity_id/depth(hybrid 检索只需 ID 集合,跳过路径构建与解析)
+        relation_types: 只遍历这些 relation_type 的边;None 遍历全部
 
     Returns:
         列表,每项 {"entity_id": str, "depth": int, "path_nodes": list, "path_edges": list}
@@ -136,6 +152,7 @@ async def find_n_degree_relations(
     """
     scope_clause, scope_params = build_scope_clause(scope_filter)
     scope_where = f" AND ({scope_clause})" if scope_clause else ""
+    type_where, type_params = _relation_type_clause(relation_types)
 
     if include_paths:
         # MIN(depth) 聚合: SQLite 保证裸列(path_nodes/path_edges)取自
@@ -159,7 +176,7 @@ async def find_n_degree_relations(
                 b.path_nodes || t.object_id || ',' AS path_nodes,
                 b.path_edges || {("t.id || ','") if include_paths else "''"} AS path_edges
             FROM bfs b
-            JOIN triples t ON t.subject_id = b.node{scope_where}
+            JOIN triples t ON t.subject_id = b.node{scope_where}{type_where}
             WHERE b.depth < ?
               AND t.valid_to IS NULL
               AND t.object_id IS NOT NULL
@@ -173,7 +190,7 @@ async def find_n_degree_relations(
         ORDER BY depth, node
     """
 
-    params: list = [entity_id, entity_id, *scope_params, max_depth]
+    params: list = [entity_id, entity_id, *scope_params, *type_params, max_depth]
 
     cursor = await conn.execute(sql, params)
     rows = await cursor.fetchall()

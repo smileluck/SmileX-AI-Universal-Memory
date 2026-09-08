@@ -8,6 +8,26 @@
 
 ### Added
 
+- **图检索服务化出口(修复 L2 图谱/时序策略在服务路径不可达)**:
+  - MCP `memory_recall` 新增可选聚焦参数 `entity`(实体名/归一化
+    entity_id/ULID,经 `mcp_server.resolve_entity_ref` 只读解析 —
+    同名跨 scope 歧义时优先指定 project、其次 global)与
+    `time_start`/`time_end`(ISO 时间对)→ 透传
+    `RecallRequest.entity_filter/time_range`,触发 L2 图谱/时序策略;
+    实体未找到时抛带指引的 ValueError
+  - 新增 MCP 工具 `memory_graph_query`: `mode=path`(两实体最短
+    路径)/`neighbors`(N 度关系)/`causal`(沿 predecessor 链追溯,
+    direction=backward/forward/both);实体参数接受名称,输出节点带
+    实体名、边带谓词/relation_type 摘要;`relation_types` 逗号分隔
+    限定边类型(仅 path/neighbors — 因果链沿 predecessor 结构遍历,
+    类型恒为 causal)
+  - `find_path`/`find_n_degree_relations`(查询层 + StorageEngine
+    包装)新增 `relation_types` 参数,递归 CTE 的 JOIN 加参数化
+    `relation_type IN (...)`;`POST /api/recall-test` body 增加同名
+    entity/time_start/time_end 聚焦字段(实体未找到安全降级为无聚焦)
+  - MCP instructions 与模块 docstring 工具清单同步;as-built §5/§11
+    与名词表更新(工具数四→六,补记 graph_query/report_error)
+
 - **错误指纹 + 教训闭环(§ 主动优化收官,DSH 自我纠错模式的确定性实现;
   零 LLM 零轮询)**:
   - schema 015 `error_fingerprints`: 指纹 = sha256(scope|code|规范化

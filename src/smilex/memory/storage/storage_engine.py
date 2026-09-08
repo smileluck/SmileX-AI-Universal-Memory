@@ -402,16 +402,23 @@ class StorageEngine:
             scope_filter=scope_filter,
         )
 
-    async def find_path(self, src, dst, *, max_depth=5, scope_filter=None):
+    async def find_path(
+        self, src, dst, *, max_depth=5, scope_filter=None, relation_types=None
+    ):
         return await queries.find_path(
-            self.conn, src, dst, max_depth=max_depth, scope_filter=scope_filter
+            self.conn, src, dst,
+            max_depth=max_depth, scope_filter=scope_filter,
+            relation_types=relation_types,
         )
 
     async def find_n_degree_relations(
-        self, entity_id, *, max_depth=2, scope_filter=None
+        self, entity_id, *, max_depth=2, scope_filter=None, include_paths=True,
+        relation_types=None,
     ):
         return await queries.find_n_degree_relations(
-            self.conn, entity_id, max_depth=max_depth, scope_filter=scope_filter
+            self.conn, entity_id,
+            max_depth=max_depth, scope_filter=scope_filter,
+            include_paths=include_paths, relation_types=relation_types,
         )
 
     async def trace_causal_chain(

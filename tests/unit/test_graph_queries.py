@@ -282,3 +282,101 @@ async def test_graph_queries_on_empty_db():
     assert await find_n_degree_relations(conn, "a", max_depth=2) == []
 
     await eng.close()
+
+
+# ---------- relation_types 过滤(服务化出口 A1) ----------
+
+@pytest.mark.asyncio
+async def test_find_path_relation_type_filter(engine_with_graph):
+    """限定边类型后路径重新计算: 全类型 bob→company_x 3 跳,限 causal 无路."""
+    conn = engine_with_graph.conn
+    # 加一条 causal 边: bob ──causes──▶ dave
+    await conn.execute(
+        "INSERT INTO triples(id, triple_id, subject_id, predicate, object_id, "
+        "scope, valid_from, relation_type) "
+        "VALUES ('t_c1', 'tri_t_c1', 'e2', 'causes', 'e4', 'global', "
+        "'2025-01-01T00:00:00.000000Z', 'causal')"
+    )
+    await conn.commit()
+
+    # 不过滤: e2→e5 走 e2→e4→e1→e5(3 跳)
+    result = await find_path(conn, "e2", "e5")
+    assert result is not None and result["depth"] == 3
+
+    # 限 semantic: 路径仍在(全部语义边)
+    result = await find_path(conn, "e2", "e5", relation_types=["semantic"])
+    assert result is not None and result["depth"] == 3
+
+    # 限 causal: e2 只有出边到 e4,之后无 causal 边可走 → 无路径
+    assert await find_path(conn, "e2", "e5", relation_types=["causal"]) is None
+
+    # 多类型并集: causal+semantic 与不过滤等价
+    result = await find_path(
+        conn, "e2", "e5", relation_types=["causal", "semantic"]
+    )
+    assert result is not None and result["depth"] == 3
+
+
+@pytest.mark.asyncio
+async def test_find_n_degree_relation_type_filter(engine_with_graph):
+    """N 度关系按边类型过滤: alice 的出边全是 semantic,限 causal 为空."""
+    conn = engine_with_graph.conn
+    await conn.execute(
+        "INSERT INTO triples(id, triple_id, subject_id, predicate, object_id, "
+        "scope, valid_from, relation_type) "
+        "VALUES ('t_c1', 'tri_t_c1', 'e1', 'causes', 'e5', 'global', "
+        "'2025-01-01T00:00:00.000000Z', 'causal')"
+    )
+    await conn.commit()
+
+    # 限 causal: 只能看到 e5(causal 直达边),看不见 semantic 的 bob
+    relations = await find_n_degree_relations(
+        conn, "e1", max_depth=2, relation_types=["causal"]
+    )
+    assert {r["entity_id"] for r in relations} == {"e5"}
+
+    # 限 semantic: 与既有语义图一致(e2/e5 一跳,e3/e4 两跳)
+    relations = await find_n_degree_relations(
+        conn, "e1", max_depth=2, relation_types=["semantic"]
+    )
+    related = {r["entity_id"]: r["depth"] for r in relations}
+    assert related == {"e2": 1, "e5": 1, "e3": 2, "e4": 2}
+
+
+@pytest.mark.asyncio
+async def test_engine_wrapper_relation_types_passthrough():
+    """StorageEngine 包装方法透传 relation_types(middleware/工具层经此调用)."""
+    from smilex.memory.storage.storage_engine import StorageEngine
+
+    engine = StorageEngine(":memory:", load_vec=False)
+    await engine.initialize()
+    try:
+        conn = engine.conn
+        await conn.execute(
+            "INSERT INTO entities(id, entity_id, entity_type, name, scope, valid_from)"
+            " VALUES ('e1', 'person:a', 'person', 'A', 'global',"
+            " '2025-01-01T00:00:00.000000Z')"
+        )
+        await conn.execute(
+            "INSERT INTO entities(id, entity_id, entity_type, name, scope, valid_from)"
+            " VALUES ('e2', 'person:b', 'person', 'B', 'global',"
+            " '2025-01-01T00:00:00.000000Z')"
+        )
+        await conn.execute(
+            "INSERT INTO triples(id, triple_id, subject_id, predicate, object_id, "
+            "scope, valid_from, relation_type) "
+            "VALUES ('t1', 'tri_t1', 'e1', 'knows', 'e2', 'global', "
+            "'2025-01-01T00:00:00.000000Z', 'semantic')"
+        )
+        await conn.commit()
+
+        relations = await engine.find_n_degree_relations(
+            "e1", max_depth=1, relation_types=["causal"]
+        )
+        assert relations == []
+        relations = await engine.find_n_degree_relations(
+            "e1", max_depth=1, relation_types=["semantic"]
+        )
+        assert {r["entity_id"] for r in relations} == {"e2"}
+    finally:
+        await engine.close()

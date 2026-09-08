@@ -232,6 +232,15 @@ schema < 13 的老库 `fts_fragments` 不存在时 `OperationalError` 捕获 →
 (LoCoMo 实测裸 BGE-M3 R\@10 86.7%);BM25 补关键词面,RRF 融合后
 96.7%(conv-26 采样),全量 95.3%。两路互补,单路都到不了。
 
+**服务化出口(2026-09 接线)**:L2 策略触发参数(entity/time)此前
+只在库内 API 可达;现 MCP `memory_recall` 的 `entity`/`time_start`/
+`time_end` 与 `POST /api/recall-test` 同名字段经实体名解析
+(`mcp_server.resolve_entity_ref`,只读不建实体)透传到
+`RecallRequest.entity_filter/time_range`;图遍历另有独立工具
+`memory_graph_query`(path/neighbors/causal,见 §11),把
+`find_path`/`find_n_degree_relations`/`trace_causal_chain` 接出
+服务层,neighbors/path 支持按 relation_types 过滤。
+
 ## 6. 可插拔组件:六个 Protocol
 
 同构设计——默认零依赖实现 + 可选强实现,core 永不强制引入
@@ -394,16 +403,24 @@ semantic 各一模块 + `_common.py` 共享子句,`__init__.py` 的 `CoreTaskRun
 token_budget=4000 / enable_scheduler=true`,CLI 可覆盖 db/host/port):
 
 - **MCP**(stdio + streamable-http `/mcp`):`memory_recall(query,
-  session_id, project, top_k, token_budget)` / `memory_write(content,
+  session_id, project, top_k, token_budget, entity, time_start,
+  time_end)`(entity=实体名/归一化 ID/ULID,解析后触发 L2 图谱策略;
+  ISO 时间对触发时序策略)/ `memory_write(content,
   session_id, scope, scope_id, entities, relations, importance)` /
   `memory_init_project(name, project_path, scan_git, scan_markdown,
   scan_code, max_commits, ...)`(冷启动+扫描生成初始记忆;stdio 模式
   project_path 缺省时按 db 路径 `<项目根>/.smilex/memory.db` 推断,
-  HTTP 模式需显式传参)/ `memory_stats`/ `memory_report_error`(错误指纹
-  登记与教训闭环,见 server/lessons.py);Reranker/Extractor 按 config
-  工厂构造注入
+  HTTP 模式需显式传参)/ `memory_graph_query(mode, ...)`
+  (图遍历出口:path 两实体最短路径 / neighbors N 度关系 / causal 沿
+  predecessor 链追溯;path/neighbors 支持 relation_types 逗号分隔
+  过滤,查询层 `find_path`/`find_n_degree_relations` 新增同名参数透传;
+  实体参数接受名称,节点/边输出带实体名与谓词摘要)/ `memory_stats`/
+  `memory_report_error`(错误指纹登记与教训闭环,见 server/lessons.py);
+  Reranker/Extractor 按 config 工厂构造注入
 - **REST**(`api.py`):`GET /stats` `/memories` `/memory/{id}`
-  `/tasks` + `POST /recall-test`
+  `/tasks` + `POST /recall-test`(body 增加可选 entity/time_start/
+  time_end 聚焦字段,与 memory_recall 同语义;实体名解析失败安全降级
+  为无聚焦检索)
 - **Web 面板**:只读静态页(概览统计/记忆浏览/召回测试),写入统一走 MCP
 - **CLI**(`cli/` 包 → `smilex-memory`,入口点 `smilex.cli:main`):
   `serve` / `mcp` / `init`
@@ -596,7 +613,7 @@ token_budget=4000 / enable_scheduler=true`,CLI 可覆盖 db/host/port):
 
 | 名词 | 解释 |
 |---|---|
-| MCP | Model Context Protocol,Agent 工具接入协议;本项目暴露 memory_recall/write/init_project/stats 四工具 |
+| MCP | Model Context Protocol,Agent 工具接入协议;本项目暴露 memory_recall/write/init_project/graph_query/report_error/stats 六工具 |
 | stdio / streamable-http | MCP 两种传输:子进程标准输入输出 / HTTP 常驻端点(/mcp) |
 | Web 面板 | 只读管理页(概览/浏览/召回测试);写入统一走 MCP 工具 |
 | config.toml | `~/.smilex/config.toml`,服务化配置(db/embedder/reranker/fact_extractor 等) |

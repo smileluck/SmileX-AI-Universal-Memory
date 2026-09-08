@@ -5,13 +5,16 @@
 - streamable HTTP: ``smilex-memory serve`` 挂载到 FastAPI(全局常驻,推荐)
 
 工具约定(返回 JSON 文本):
-- memory_recall: 检索记忆上下文(回答涉及项目事实/历史决策前先调)
+- memory_recall: 检索记忆上下文(回答涉及项目事实/历史决策前先调);
+  可选 entity(实体名/ID,触发图谱策略)与 time_start/time_end(触发时序策略)
 - memory_write: 沉淀新事实/结论(任务完成、得到新决策时调;带
   error_fingerprint 时按教训协议写【教训】并回链错误指纹)
 - memory_report_error: 错误指纹登记(出错时调;同指纹第 2 次起提示沉淀
   教训,已有教训则直接回传内容)
 - memory_init_project: 新项目冷启动 + 扫描生成初始记忆(README/git 历史/
   markdown 文档/源码结构;project_path 缺省时 stdio 模式按 db 路径推断项目根)
+- memory_graph_query: 图谱结构查询(实体最短路径 / N 度关系 / 因果链追溯),
+  memory_recall 语义召回之外的图遍历出口
 - memory_stats: 各层记忆计数(调试/面板)
 
 session_id: 同一对话会话内保持一致可获得 L0 工作记忆加速;缺省 "default"。
@@ -22,11 +25,11 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from ..memory.embedder import EmbedderConfig, get_embedder
 from ..memory.extractor import ExtractorConfig, get_extractor
-from ..memory.models import MemoryScope, ScopeFilter
+from ..memory.models import MemoryScope, ScopeFilter, TimeRange
 from ..memory.observability import Telemetry
 from ..memory.pii import PIIConfig, get_pii_masker
 from ..memory.reranker import RerankerConfig, get_reranker
@@ -38,6 +41,7 @@ from ..middlewares.dto import (
     WriteRequest,
 )
 from ..middlewares.memory import MemoryMiddleware
+from ..utils.timeutil import from_iso
 from .config import ServerConfig
 from .lessons import (
     build_advice,
@@ -213,6 +217,89 @@ def _parse_scope(scope: str | None) -> MemoryScope:
         ) from e
 
 
+async def resolve_entity_ref(
+    conn: Any, ref: str, *, project: str | None = None
+) -> str | None:
+    """实体名 / 归一化 entity_id / ULID → entities.id(recall 图谱策略与图查询共用).
+
+    只读解析,不自动建实体(写入路径的 get-or-create 在 _write_path)。
+    同名实体跨 scope 歧义时优先指定 project 的 scope,其次 global。
+    """
+    if not ref:
+        return None
+    cursor = await conn.execute(
+        "SELECT id, scope FROM entities WHERE id = ? OR entity_id = ? OR name = ? "
+        "LIMIT 25",
+        [ref, ref, ref],
+    )
+    rows = [dict(r) for r in await cursor.fetchall()]
+    if not rows:
+        return None
+    project_scope = f"project:{project}" if project else None
+
+    def _rank(row: dict) -> tuple[int, str]:
+        if project_scope and row["scope"] == project_scope:
+            return (0, "")
+        if row["scope"] == "global":
+            return (1, "")
+        return (2, str(row["scope"]))
+
+    return str(min(rows, key=_rank)["id"])
+
+
+def parse_time_range(time_start: str | None, time_end: str | None) -> TimeRange | None:
+    """ISO 时间字符串对 → TimeRange(approx 模式;单边缺省由检索层补 now)."""
+    if not time_start and not time_end:
+        return None
+    return TimeRange(
+        approx_start=from_iso(time_start) if time_start else None,
+        approx_end=from_iso(time_end) if time_end else None,
+    )
+
+
+async def _entity_names(conn: Any, ids: list[str]) -> dict[str, str]:
+    """entities.id 列表 → {id: name}(查无的 id 不进结果,调用方回退显示原 id)."""
+    unique = list(dict.fromkeys(i for i in ids if i))
+    if not unique:
+        return {}
+    placeholders = ",".join("?" for _ in unique)
+    cursor = await conn.execute(
+        f"SELECT id, name FROM entities WHERE id IN ({placeholders})", unique
+    )
+    return {str(r["id"]): str(r["name"]) for r in await cursor.fetchall()}
+
+
+async def _triple_summaries(conn: Any, ids: list[str]) -> list[dict]:
+    """triples.id 列表 → 摘要列表(端点尽量换实体名,便于直接阅读)."""
+    unique = list(dict.fromkeys(i for i in ids if i))
+    if not unique:
+        return []
+    placeholders = ",".join("?" for _ in unique)
+    cursor = await conn.execute(
+        "SELECT id, subject_id, predicate, object_id, object_value, relation_type "
+        f"FROM triples WHERE id IN ({placeholders})",
+        unique,
+    )
+    rows = [dict(r) for r in await cursor.fetchall()]
+    endpoint_ids = [str(r["subject_id"]) for r in rows]
+    endpoint_ids += [str(r["object_id"]) for r in rows if r["object_id"]]
+    names = await _entity_names(conn, endpoint_ids)
+    return [
+        {
+            "id": str(r["id"]),
+            "subject": names.get(str(r["subject_id"]), str(r["subject_id"])),
+            "predicate": str(r["predicate"]),
+            "object": (
+                names.get(str(r["object_id"]), str(r["object_id"]))
+                if r["object_id"]
+                else str(r["object_value"] or "?")
+            ),
+            "relation_type": str(r["relation_type"]),
+        }
+        for r in rows
+    ]
+
+
 def create_mcp_server(service: MemoryService) -> MCPServer:
     """创建 MCP server 并注册记忆工具(stdio / streamable-http 复用)."""
     _require_mcp()
@@ -222,7 +309,10 @@ def create_mcp_server(service: MemoryService) -> MCPServer:
         name="smilex-memory",
         description="SmileX Agent 长期记忆: 时序/图谱/因果/语义多路召回",
         instructions=(
-            "涉及项目事实、历史决策、个人偏好时先调 memory_recall 获取上下文;"
+            "涉及项目事实、历史决策、个人偏好时先调 memory_recall 获取上下文"
+            "(可传 entity 实体名聚焦图谱检索、time_start/time_end 聚焦时序检索);"
+            "需要结构化图遍历(两实体间路径/实体 N 度关系/因果链追溯)时调"
+            " memory_graph_query。"
             "任务完成或得到新结论后调 memory_write 沉淀。"
             "遇到报错/失败时调 memory_report_error(code, message):"
             "响应含 lesson 则直接遵循;提示 should_write_lesson 则排查后用"
@@ -235,6 +325,8 @@ def create_mcp_server(service: MemoryService) -> MCPServer:
     @server.tool(
         description="检索长期记忆: 多路召回(L0 工作记忆 + 向量 KNN + 时序/图谱/因果混合)"
         "并按 token 预算裁剪。回答涉及项目事实/历史/偏好前先调用。"
+        "可选聚焦参数: entity(实体名或 ID,触发图谱 N 度扩展策略)、"
+        "time_start/time_end(ISO 时间,触发时序策略)。"
     )
     async def memory_recall(
         query: str,
@@ -242,13 +334,28 @@ def create_mcp_server(service: MemoryService) -> MCPServer:
         project: str | None = None,
         top_k: int = 10,
         token_budget: int | None = None,
+        entity: str | None = None,
+        time_start: str | None = None,
+        time_end: str | None = None,
     ) -> str:
         """检索记忆,返回拼接好的上下文与来源明细(JSON)."""
         memory = await service.get()
+        entity_filter: str | None = None
+        if entity:
+            entity_filter = await resolve_entity_ref(
+                memory.engine.conn, entity, project=project
+            )
+            if entity_filter is None:
+                raise ValueError(
+                    f"未找到实体 {entity!r}(接受实体名/归一化 ID/ULID;"
+                    "实体随 memory_write 的 entities/relations 建立)"
+                )
         resp = await memory.recall(
             RecallRequest(
                 query=query,
                 scope_filter=ScopeFilter(include_project=project),
+                time_range=parse_time_range(time_start, time_end),
+                entity_filter=entity_filter,
                 top_k=top_k,
                 token_budget=token_budget or service.config.token_budget,
             ),
@@ -364,6 +471,120 @@ def create_mcp_server(service: MemoryService) -> MCPServer:
             max_commits=max_commits,
         )
         return json.dumps(result, ensure_ascii=False)
+
+    @server.tool(
+        description="图谱结构查询(memory_recall 语义召回之外的图遍历出口): "
+        "mode=path 求两实体间最短路径(src/dst);mode=neighbors 求实体 N 度关系"
+        "(entity);mode=causal 沿因果链追溯(triple_id,direction=backward 根因/"
+        "forward 影响范围/both 双向)。实体参数接受实体名/归一化 ID/ULID;"
+        "relation_types 逗号分隔限定边类型(causal/spatial/temporal/semantic/"
+        "project_state/task_status/config,仅 path/neighbors 生效 — 因果链沿"
+        "predecessor_id 结构遍历,边类型恒为 causal)。返回带实体名与谓词摘要的 JSON。"
+    )
+    async def memory_graph_query(
+        mode: str,
+        src: str | None = None,
+        dst: str | None = None,
+        entity: str | None = None,
+        triple_id: str | None = None,
+        direction: str = "both",
+        max_depth: int | None = None,
+        relation_types: str | None = None,
+        project: str | None = None,
+    ) -> str:
+        """图遍历查询: 实体路径 / N 度关系 / 因果链(JSON)."""
+        memory = await service.get()
+        conn = memory.engine.conn
+        scope_filter = ScopeFilter(include_project=project)
+        types = [t.strip() for t in (relation_types or "").split(",") if t.strip()] or None
+
+        async def _resolve(ref: str | None, what: str) -> str:
+            if not ref:
+                raise ValueError(f"mode={mode} 需要 {what} 参数")
+            resolved = await resolve_entity_ref(conn, ref, project=project)
+            if resolved is None:
+                raise ValueError(f"未找到实体 {ref!r}")
+            return resolved
+
+        if mode == "path":
+            src_id = await _resolve(src, "src")
+            dst_id = await _resolve(dst, "dst")
+            found = await memory.engine.find_path(
+                src_id,
+                dst_id,
+                max_depth=max_depth or 5,
+                scope_filter=scope_filter,
+                relation_types=types,
+            )
+            if found is None:
+                payload: dict = {"found": False}
+            else:
+                names = await _entity_names(conn, found["nodes"])
+                payload = {
+                    "found": True,
+                    "depth": found["depth"],
+                    "nodes": [
+                        {"id": nid, "name": names.get(nid, nid)}
+                        for nid in found["nodes"]
+                    ],
+                    "edges": await _triple_summaries(conn, found["edges"]),
+                }
+        elif mode == "neighbors":
+            eid = await _resolve(entity, "entity")
+            relations = await memory.engine.find_n_degree_relations(
+                eid,
+                max_depth=max_depth or 2,
+                scope_filter=scope_filter,
+                relation_types=types,
+            )
+            lookup_ids = [eid] + [r["entity_id"] for r in relations]
+            for r in relations:
+                lookup_ids.extend(r.get("path_nodes", []))
+            names = await _entity_names(conn, lookup_ids)
+            decorated = []
+            for r in relations:
+                item: dict = {
+                    "entity_id": r["entity_id"],
+                    "name": names.get(r["entity_id"], r["entity_id"]),
+                    "depth": r["depth"],
+                }
+                if "path_nodes" in r:
+                    item["path"] = [names.get(n, n) for n in r["path_nodes"]]
+                decorated.append(item)
+            payload = {
+                "entity": {"id": eid, "name": names.get(eid, eid)},
+                "relations": decorated,
+            }
+        elif mode == "causal":
+            if not triple_id:
+                raise ValueError("mode=causal 需要 triple_id 参数")
+            chain = await memory.engine.trace_causal_chain(
+                triple_id,
+                direction=direction,
+                max_depth=max_depth or 20,
+                scope_filter=scope_filter,
+            )
+            chain_ids = [chain["start"]]
+            for key in ("backward", "forward"):
+                chain_ids.extend(item["id"] for item in chain.get(key, []))
+            summaries = {s["id"]: s for s in await _triple_summaries(conn, chain_ids)}
+            payload = {
+                "start": summaries.get(chain["start"], {"id": chain["start"]})
+            }
+            for key in ("backward", "forward"):
+                if key in chain:
+                    payload[key] = [
+                        {
+                            "depth": item["depth"],
+                            "triple": summaries.get(
+                                item["id"], {"id": item["id"]}
+                            ),
+                        }
+                        for item in chain[key]
+                    ]
+        else:
+            raise ValueError(f"mode 必须是 path/neighbors/causal,得到 {mode!r}")
+        return json.dumps(payload, ensure_ascii=False)
 
     @server.tool(description="记忆统计: 各层/各 scope 的条目计数(调试与面板用)。")
     async def memory_stats(scope: str | None = None) -> str:
