@@ -474,4 +474,7 @@ async def test_priority_lru():
 | MVP | L0/L1 + 基础 ContextBuilder |
 | P1 | L2 混合检索 + L1→L2 整合任务 |
 | P2 | L3 语义 + LLM 摘要压缩 |
-| P3 | 强化学习自适应 Token 分配 |
+| P3 | 反馈驱动启发式 Token 分配**[2026-09 降级: 原"强化学习"否决]**
+  — 单用户库 RL 不可训练/不可测,与确定性贪心装填的测试体系冲突;
+  改为 schema 014 的 access_count/留存分信号加权装填排序,确定性拿到
+  90% 价值 |

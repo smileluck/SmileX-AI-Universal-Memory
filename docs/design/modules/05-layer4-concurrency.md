@@ -403,9 +403,9 @@ src/smilex/memory/concurrency/     # P1-a 已落地(2026-08-21)
 ├── conflict_detection.py    # ✅ 五类冲突检测(版本追踪 + 因果环/矛盾 SQL)
 ├── conflict_resolution.py   # ✅ 自动解决策略(§10.3 默认策略表)
 ├── controller.py            # ✅ 三层组合门面(middleware 写入路径接入)
-├── chain_coordinator.py     # ⏳ 链协调(P2)
-├── wait_for_graph.py        # ⏳ 等待图死锁检测(P2,超时已兜底)
-└── write_queue.py           # ⏳ 批量写入(P2)
+├── chain_coordinator.py     # ✖ wontfix(2026-09): P2 无它全绿,锁排序已防死锁
+├── wait_for_graph.py        # ✖ wontfix(2026-09): FIFO+锁排序+超时兜底已覆盖
+└── write_queue.py           # ✖ wontfix(2026-09): 写入 P99 实测 3ms,无批量化需求
 ```
 
 ### 4.2 关键风险
@@ -469,4 +469,6 @@ async def test_deadlock_detection():
 | MVP | 不实现（依赖 SQLite 单写者）|
 | P1 | 乐观锁 + 基础冲突检测 |
 | P2 | 内存锁 + 死锁检测 |
-| P3 | 分布式锁（多实例场景）|
+| P3 | 分布式锁(多实例场景)**[2026-09 注: 被 PG 适配器阻塞]**
+  — SQLite 单文件无跨机共享库,多实例前提是存储层换 PG(02 §5);
+  SQLite 路线下此项 N/A |

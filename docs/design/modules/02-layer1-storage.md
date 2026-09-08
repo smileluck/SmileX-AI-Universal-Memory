@@ -582,4 +582,7 @@ async def test_hybrid_search_rrf():
 | MVP | SQLite + sqlite-vec + ChromaDB + 基础检索 |
 | P1 | 优化索引 + 复合查询 + 触发器维护 |
 | P2 | sqlite-vec 替代 ChromaDB（统一）|
-| P3 | 支持 PostgreSQL 适配器（多用户场景）|
+| P3→P5 | 支持 PostgreSQL 适配器(多用户场景)**[2026-09 注: 维持远期,不预设计]**
+  — 需同步替换 sqlite-vec/FTS5/R-tree 三套扩展(pgvector/tsvector/PostGIS),
+  相当于重写存储层;多用户需求(P5 SaaS 化)出现前不动。分析型负载优先
+  考虑既定技术路线中的 DuckDB(D3),而非 PG |

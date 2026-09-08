@@ -77,7 +77,12 @@
 **待办**:
 - [x] 主文档 §6.3 触发器与新 DDL 对齐(已对齐,文档无需改)
 - [x] 主文档 §5.2 备注 scope 列存全路径,Layer 0 ↔ Layer 1 转换说明 — 已补充(2026-08-21)
-- [ ] P1 阶段重构:引入 predicate_category 列(技术债)
+- [x] P1 阶段重构:引入 predicate_category 列(技术债)— **关闭为 wontfix(2026-09-08)**:
+      7 值合并的 relation_type 已稳定运行(全库查询按集合过滤,如
+      `relation_type IN ('project_state','task_status','config')`),拆列收益
+      仅语义纯度,代价是 schema 迁移 + 触发器/查询/测试全链改动。
+      ADR-015(主文档 §17)采纳同一结论:剩余边类型按需扩 CHECK,不另起列。
+      若未来状态跟踪值继续膨胀再重开此项。
 
 ---
 

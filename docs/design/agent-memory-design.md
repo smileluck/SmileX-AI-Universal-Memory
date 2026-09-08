@@ -1360,6 +1360,11 @@ async function initialize_project(meta, template=None):
 
 ### 15.1 性能优化
 
+> **2026-09 注**: WAL/cachebox/复合索引已落地(写入 P99 实测 ≈3ms、检索
+> P99 ≈8ms,远超 SLA)。**HNSW 与异步索引构建按 SLA 证据拒绝** —
+> sqlite-vec 暴力扫描在当前规模(10 项目/年 ~150K 向量)下 P99 达标,
+> 为不存在的延迟做设计;两者仅在实测超 SLA 后重开。
+
 | 建议 | 措施 | 预期收益 |
 |------|------|---------|
 | **WAL 模式** | `PRAGMA journal_mode=WAL; synchronous=NORMAL` | 写入吞吐 3x |
@@ -1370,6 +1375,12 @@ async function initialize_project(meta, template=None):
 | **prepared statement** | 复用执行计划 | 查询延迟降低 30% |
 
 ### 15.2 可扩展性优化（SQLite 单写者瓶颈缓解）
+
+> **2026-09 注**: 冷热分层已以**同库归档表**落地(schema 011,06-layer5
+> §3.5 的 ATTACH 独立归档库简化,嵌入式单库召回路径最简)。
+> **写入批量化/时间分区表/项目分库按 SLA 证据拒绝** — 单写者写入 P99
+> 实测 3ms,无排队现象;分区/分库与单文件 ADR-001 及跨 scope JOIN 冲突。
+> ChromaDB 行随决策 D1 废弃。
 
 | 建议 | 措施 | 适用阶段 |
 |------|------|---------|
@@ -1403,6 +1414,12 @@ async function initialize_project(meta, template=None):
 
 ### 15.5 成本优化
 
+> **2026-09 注**: Embedding 本地化(hash 默认 + BGE-M3 可选)、冷数据归档、
+> 任务批量化(LOW/IDLE + 自适应规则)已落地;Lite 模式随 ChromaDB 废弃
+> 不适用。**向量量化维持"工具就绪、按需投产"** — int8 编解码工具已备
+> (quality/quantization.py),vec0 无法原位存 int8,生产应用(PQ/辅助
+> 向量副本)待体积实测超预算再启。
+
 | 建议 | 措施 | 节省 |
 |------|------|------|
 | **Embedding 本地化** | BGE/E5 替代 OpenAI | API 成本 90% |
@@ -1412,6 +1429,11 @@ async function initialize_project(meta, template=None):
 | **Lite 模式** | 无 ChromaDB，纯 sqlite-vec | 内存 30% |
 
 ### 15.6 工程化优化
+
+> **2026-09 注**: Schema 版本化(v15)/测试覆盖(847 单测)/CI-CI
+> (ci.yml + publish.yml)/配置中心(pydantic-settings + example.yaml)
+> 已落地。**接口版本化与嵌入式打包维持可选** — MCP+面板是主接口,
+> HTTP /api 无版本前缀;PyInstaller 打包待真实分发需求。
 
 | 建议 | 措施 |
 |------|------|

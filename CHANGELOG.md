@@ -8,6 +8,27 @@
 
 ### Added
 
+- **设计文档治理批次(规划收口)**:
+  - `10-personal-growth` v2 原地重写: 个人成长改用现有原语(skill:
+    实体命名空间 + 双时态 skill_level 三元组 + 【学习】/【复盘】前缀
+    fragment 并入教训闭环),零新表零 scope 迁移,算法下沉 agent 侧;
+    隐私三选一;路线图 0.5 天约定层 MVP
+  - `08-graph-category-research`/`11-project-export` 减法修订: 顶部
+    修订记录逐条对照 as-built(P0 两项标记等效落地、QueryRouter/
+    Shortcut 边/DSL/export.yaml/增量导出/Git hook/反向导入等否决并
+    记录理由;社区检测改向 networkx Louvain 轻量版;模式 C 改写为
+    复用现有 MCP server;§4 快照格式按 v15 实现重写)
+  - ADR-015~018(修订后结论)回填主文档 §17,编号与 019~022 连续;
+    ADR-019~022 按落地语义修订(ADR-022 改写为"向量重建一等公民")
+  - 演进路径逐条降级/关闭: 02 PG 适配器维持远期 P5 + 三扩展替换注记、
+    03 RL→反馈驱动启发式、04 学习型调度→统计驱动、05 分布式锁标记
+    "被 PG 阻塞,SQLite 路线 N/A"、chain_coordinator/wait_for_graph/
+    write_queue 标 wontfix;GAPS D6(predicate_category)关闭为
+    wontfix,唯一未勾选 checkbox 清零
+  - 主文档 §15.1/15.2/15.5/15.6 补落地状态注记(HNSW/异步索引/写入
+    批量化/分区表/项目分库按 SLA 证据拒绝);12 号执行计划 §8
+    "下一会话起点"刷新(2026-09 状态 + 剩余可选项排序)
+
 - **克隆/导入向量重建 + merge 归并 + locations 对称化(快照迁移路径补全)**:
   - `CrossProjectCloner` 构造新增可选 `vector_store` 参数(middleware
     `clone_project` 装配点注入): 克隆/导入的每个新实体(名字)与新片段
