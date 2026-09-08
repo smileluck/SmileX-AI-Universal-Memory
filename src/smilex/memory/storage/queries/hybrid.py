@@ -122,7 +122,10 @@ async def _run_graph_strategy(
     placeholders = ",".join(["?" for _ in related_ids])
     cursor = await conn.execute(
         f"SELECT id FROM triples WHERE (subject_id IN ({placeholders}) "
+        # valid_to IS NULL: 只取当前有效边 — 被覆盖(superseded)的旧值
+        # 不进入召回上下文;时间线/as-of 查询走 temporal 模块保持全版本
         f"OR object_id IN ({placeholders})){scope_where} "
+        f"AND valid_to IS NULL "
         f"ORDER BY valid_from DESC LIMIT ?",
         [*related_ids, *related_ids, *scope_params, query.top_k_per_strategy],
     )

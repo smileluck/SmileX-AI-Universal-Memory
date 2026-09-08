@@ -315,7 +315,7 @@ async def test_forgetting_rules(engine, scheduler):
     now_s = "2026-08-21T00:00:00.000000Z"  # 晚于所有测试时间
     old = "2026-01-01T00:00:00.000000Z"  # ~232 天前
     await _add_fragment(conn, "f-expired", "已过期记忆", time_end="2025-06-01T00:00:00.000000Z",
-                        updated_at=now_s, importance=0.9)
+                        updated_at=now_s, importance=0.8)  # 低于 0.9 守卫门槛,过期路径可删
     await _add_fragment(conn, "f-decayed", "陈旧低值记忆", updated_at=old, importance=0.2)
     await _add_fragment(conn, "f-hot", "新鲜重要记忆", updated_at=now_s, importance=0.9)
 

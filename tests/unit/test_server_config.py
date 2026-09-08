@@ -171,3 +171,9 @@ def test_summarizer_defaults_rule():
 def test_access_tracking_default_on():
     config = ServerConfig()
     assert config.access_tracking is True
+
+
+def test_capacity_and_guard_defaults():
+    config = ServerConfig()
+    assert config.max_records_per_scope == 0  # 默认关闭
+    assert config.protect_importance == 0.9

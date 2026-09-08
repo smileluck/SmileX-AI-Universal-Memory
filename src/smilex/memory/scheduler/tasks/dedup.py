@@ -25,13 +25,12 @@ payload:
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import json
 import re
 from typing import TYPE_CHECKING, Any
 
 from ...observability.logging import get_logger
-from ._common import _scope_clause
+from ._common import _scope_clause, drop_fragment_vectors
 
 if TYPE_CHECKING:
     from ...storage.storage_engine import StorageEngine
@@ -80,6 +79,7 @@ async def dedup(
     threshold = float(payload.get("threshold", 0.7))
     min_length = int(payload.get("min_length", 12))
     max_candidates = int(payload.get("max_candidates", 5))
+    protect_importance = float(payload.get("protect_importance", 0.9))
     batch_size = int(payload.get("batch_size", 50))
     step_delay = float(payload.get("step_delay", 0.0))
 
@@ -118,6 +118,12 @@ async def dedup(
             merged_any = False
             for cand in candidates:
                 if cand["id"] in merged_away:
+                    continue
+                # 删除守卫: 任一侧为受保护高价值行 → 跳过该对(保守不合并)
+                if (
+                    float(row["importance"]) >= protect_importance
+                    or float(cand["importance"]) >= protect_importance
+                ):
                     continue
                 if jaccard(gram_set, _bigrams(_normalize(str(cand["content"])))) < threshold:
                     continue
@@ -201,17 +207,8 @@ async def _absorb(conn: Any, survivor: Any, duplicate: Any) -> None:
             survivor["id"],
         ),
     )
-    # vector_links.fragment_id 有 FK 引用热表: 先清向量再删行(同 Archiver);
-    # memory_vectors 虚拟表在 vec 扩展未加载的库里不存在,缺表时只清 links
-    with contextlib.suppress(Exception):  # noqa: BLE001 — 无 vec 表(如测试库)时跳过
-        await conn.execute(
-            "DELETE FROM memory_vectors WHERE vector_id IN ("
-            "SELECT vector_id FROM vector_links WHERE fragment_id = ?)",
-            [duplicate["id"]],
-        )
-    await conn.execute(
-        "DELETE FROM vector_links WHERE fragment_id = ?", [duplicate["id"]]
-    )
+    # vector_links 有 FK 引用热表: 先清向量再删行(共享助手,缺 vec 表容错)
+    await drop_fragment_vectors(conn, [duplicate["id"]])
     await conn.execute(
         "DELETE FROM temporal_fragments WHERE id = ?", [duplicate["id"]]
     )

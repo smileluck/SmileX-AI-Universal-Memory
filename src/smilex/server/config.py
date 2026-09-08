@@ -62,6 +62,11 @@ class ServerConfig(BaseModel):
     enable_scheduler: bool = True
     # 检索反馈闭环(§ 主动优化): recall 命中即累加访问计数,forget 据此续命/升值
     access_tracking: bool = True
+    # 容量治理(§ 主动优化二期): 每 scope fragment 配额,forget 每日修剪超额(0=关闭)
+    max_records_per_scope: int = Field(default=0, ge=0)
+    # 删除守卫: importance 高于此值的记忆豁免 forget/dedup 一切删除
+    # (显式 confirm_protected payload 可越过)
+    protect_importance: float = Field(default=0.9, ge=0.0, le=1.0)
     # ---- 可观测性与安全(§15.3/§15.4) ----
     metrics: bool = True  # GET /metrics(Prometheus 文本格式,零依赖实现)
     audit: bool = True  # 变更事件 JSONL 审计(默认库文件旁 audit-<db>.jsonl)

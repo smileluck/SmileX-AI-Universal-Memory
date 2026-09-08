@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 from ....utils.ids import generate_id
 from ....utils.timeutil import now_utc, to_iso
-from ._common import CONSOLIDATION_PREFIX, _scope_clause
+from ._common import CONSOLIDATION_PREFIX, _scope_clause, drop_fragment_vectors
 
 if TYPE_CHECKING:
     from ...storage.storage_engine import StorageEngine
@@ -208,6 +208,8 @@ async def _flush_consolidation_group(
             now,
         ),
     )
+    # vector_links.fragment_id 有 FK 引用热表: 先清向量再删源行
+    await drop_fragment_vectors(conn, ids)
     await conn.execute(
         f"DELETE FROM temporal_fragments WHERE id IN ({placeholders})",
         ids,

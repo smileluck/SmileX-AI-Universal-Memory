@@ -8,6 +8,28 @@
 
 ### Added
 
+- **superseded 显式化(§ 主动优化二期,消除 LWW 静默覆盖)**: 同键
+  (scope+subject+predicate,当前有效)写不同值时,AUTO_LAST 放行不再产生
+  "两行都当前有效"的静默矛盾 — 旧行闭合(valid_to = 新行 valid_from,
+  沿用 008 触发器约定,与批量 INSERT 同事务原子落库)、新行记
+  predecessor_id(因果链任务自动接续;归档 365 天后自动收纳);检索图策略
+  第二段补 valid_to IS NULL 过滤,被覆盖旧值不再漏进召回上下文;
+  相同值重复断言仍不构成冲突
+- **容量治理 + 删除守卫(§ 主动优化二期,对齐 DSH "importance=3 需
+  confirm")**: forget 尾段新增容量 pass — max_per_scope(默认 0=关闭,
+  ServerConfig.max_records_per_scope)超额 scope 按留存分升序修剪
+  (受保护行豁免可超配额,逐 scope checkpoint,structlog 留痕);
+  删除守卫 protect_importance(默认 0.9)以上高价值行豁免 forget/dedup
+  一切删除,显式 payload confirm_protected 可越过;dedup 对任一侧受
+  保护的相似对直接跳过合并
+- **存量 FK 隐患修复**: forget/consolidate 删除 fragment 前统一经新增
+  共享助手 `tasks/_common.drop_fragment_vectors` 清理 vector_links +
+  memory_vectors(vector_links.fragment_id 有 FK 引用热表,此前删除带
+  向量的记忆会 FOREIGN KEY constraint failed;dedup 内联版重构为复用)
+- CoreTaskRunner 支持 forget_defaults(CoreTaskConfig 容量/守卫策略注入
+  调度触发的空 payload 运行,手动 submit 可覆盖);ServerConfig 新增
+  max_records_per_scope / protect_importance 两键
+
 - **记忆主动优化一期(检索反馈闭环 + 近重复合并,参照 DeepSeek Harness
   dsh-agent-memory 治理模式;确定性规则,零 LLM 零新增依赖)**:
   - schema 014: temporal_fragments 新增 `access_count`/`last_accessed_at`

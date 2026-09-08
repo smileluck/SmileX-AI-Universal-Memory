@@ -27,7 +27,8 @@ from ..memory.models import (
 )
 from ..memory.observability import get_logger
 from ..memory.pii import NoopPIIMasker, PIIMasker
-from ..memory.storage.storage_engine import scope_path
+from ..memory.storage.storage_engine import StorageEngine, scope_path
+from ..utils.timeutil import to_iso
 
 _logger = get_logger("write")
 
@@ -66,6 +67,10 @@ class _RelationConflictError(Exception):
 
 class _WritePathMixin:
     """M.3 写入路径(组合进 MemoryMiddleware)."""
+
+    # 宿主类(MemoryMiddleware)提供的共享状态注解(存量 mixin 模式,
+    # 此处仅为类型可见性;赋值在宿主 __init__)
+    _engine: StorageEngine
 
     # ==================== M.3 写入 ====================
 
@@ -205,8 +210,12 @@ class _WritePathMixin:
         # 批量解析名称引用的实体(H1): 一次 IN 查询代替逐条 SELECT
         name_map = await self._resolve_entity_names(request, scope_id=scope_id)
         triples: list[Triple] = []
+        # superseded 显式化(§ 主动优化二期): LWW 覆盖时旧行闭合 + 新行记
+        # predecessor_id,消除"两行都当前有效"的静默矛盾
+        superseded: dict[str, str] = {}  # 旧 triple id → 闭合时刻(新行 valid_from)
         for rel in request.relations:
             subject_id = rel.subject_id or name_map[rel.subject_name or ""]
+            predecessor_id: str | None = None
             if detect:
                 guard = await self._concurrency.guard_triple_write(
                     self._engine.conn,
@@ -226,19 +235,36 @@ class _WritePathMixin:
                             message=guard.resolution.message,
                         )
                     )
-            triples.append(
-                Triple(
-                    triple_id=(
-                        f"{subject_id}|{rel.predicate}|"
-                        f"{rel.object_id or rel.object_value}"
-                    ),
-                    subject_id=subject_id,
-                    predicate=rel.predicate,
-                    object_id=rel.object_id,
-                    object_value=rel.object_value,
-                    scope=request.scope,
-                    certainty=rel.certainty,
-                )
+                if (
+                    guard is not None
+                    and guard.resolution.action == "overwrite"
+                    and guard.conflict.conflicting_memory_id
+                ):
+                    predecessor_id = guard.conflict.conflicting_memory_id
+            new_triple = Triple(
+                triple_id=(
+                    f"{subject_id}|{rel.predicate}|"
+                    f"{rel.object_id or rel.object_value}"
+                ),
+                subject_id=subject_id,
+                predicate=rel.predicate,
+                object_id=rel.object_id,
+                object_value=rel.object_value,
+                scope=request.scope,
+                certainty=rel.certainty,
+                predecessor_id=predecessor_id,
+            )
+            if predecessor_id is not None:
+                # 沿用 008 触发器约定: 旧行 valid_to = 新行 valid_from
+                superseded[predecessor_id] = to_iso(new_triple.valid_from)
+            triples.append(new_triple)
+        if superseded:
+            # 与批量 INSERT 同一隐式事务,随 write_triples 的 commit 原子落库;
+            # 每行闭合时刻对齐其继任者的 valid_from;AND valid_to IS NULL
+            # 防御并发下已被闭合的行
+            await self._engine.conn.executemany(
+                "UPDATE triples SET valid_to = ? WHERE id = ? AND valid_to IS NULL",
+                [(ts, old_id) for old_id, ts in superseded.items()],
             )
         # 单事务批量写入(H1): N 条 triple 只刷一次 WAL
         await self._engine.write_triples(triples, scope_id=scope_id)

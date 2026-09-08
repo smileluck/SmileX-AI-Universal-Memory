@@ -62,15 +62,25 @@ class CoreTaskRunner:
     db_integrity)。summarizer 可注入 LLM 后端(§5 演进路径,默认规则版)。
     """
 
-    def __init__(self, storage: StorageEngine, summarizer: Any = None) -> None:
+    def __init__(
+        self,
+        storage: StorageEngine,
+        summarizer: Any = None,
+        forget_defaults: dict[str, Any] | None = None,
+    ) -> None:
         self._storage = storage
         self._summarizer = summarizer
+        # forget 任务的默认 payload(调度触发的运行 payload 为空,经此注入
+        # CoreTaskConfig 的容量/守卫策略;手动 submit 的 payload 可覆盖)
+        self._forget_defaults: dict[str, Any] = dict(forget_defaults or {})
 
     async def consolidate(self, ctx: InterruptContext, payload: dict[str, Any]) -> dict:
         return await consolidate(self._storage, ctx, payload)
 
     async def forget(self, ctx: InterruptContext, payload: dict[str, Any]) -> dict:
-        return await forget(self._storage, ctx, payload)
+        return await forget(
+            self._storage, ctx, {**self._forget_defaults, **payload}
+        )
 
     async def summarize(self, ctx: InterruptContext, payload: dict[str, Any]) -> dict:
         return await summarize(self._storage, ctx, payload, summarizer=self._summarizer)
@@ -106,6 +116,8 @@ class CoreTaskConfig:
     semantic_interval_seconds: float = 7200.0  # 每 2 小时图维护
     db_integrity_interval_seconds: float = 86400.0  # 每日 SQLite 巡检(§15.3)
     dedup_interval_seconds: float = 86400.0  # 每日近重复合并(§ 主动优化)
+    forget_max_per_scope: int = 0  # 每 scope fragment 配额,0=不启用(§ 主动优化二期)
+    forget_protect_importance: float = 0.9  # 删除守卫门槛(高于此值豁免删除)
 
     l1_pressure: Any = None  # Callable[[], bool]: L1 使用率 > 80%(§8.3 记忆压力)
     memory_pressure_cooldown: float = 300.0  # 5 分钟
@@ -136,7 +148,14 @@ def register_core_tasks(
         CoreTaskRunner(便于测试直接调用执行函数或自定义注册)
     """
     config = config or CoreTaskConfig()
-    runner = CoreTaskRunner(storage, summarizer=summarizer)
+    runner = CoreTaskRunner(
+        storage,
+        summarizer=summarizer,
+        forget_defaults={
+            "max_per_scope": config.forget_max_per_scope,
+            "protect_importance": config.forget_protect_importance,
+        },
+    )
 
     scheduler.register(
         TaskDefinition(

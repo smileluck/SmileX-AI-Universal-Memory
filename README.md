@@ -134,6 +134,8 @@ smilex-memory doctor
 | `fact_extractor` | `passthrough` | 事实抽取:`passthrough` 原文入库 / `llm` 写入时抽结构化事实([llm] extras,见下方环境变量) |
 | `summarizer` | `rule` | 摘要压缩:`rule` 规则截取 / `llm` 调度任务生成 LLM 摘要([llm] extras + `SMILEX_SUMMARIZE_*`,失败自动降级规则) |
 | `access_tracking` | `true` | 检索反馈闭环:recall 命中即累加访问计数(见「记忆主动优化」) |
+| `max_records_per_scope` | `0` | 每 scope fragment 配额,forget 每日修剪超额(0=关闭;受保护行豁免) |
+| `protect_importance` | `0.9` | 删除守卫:importance ≥ 此值豁免 forget/dedup 删除(confirm_protected 可越过) |
 | `token_budget` | `4000` | 召回 token 预算(`memory_recall` 按此裁剪返回内容) |
 | `enable_scheduler` | `true` | serve 进程内核心调度任务(遗忘衰减 / 语义 / 摘要 / 因果 / 巩固 + 每日 SQLite 巡检);stdio 模式不适用 |
 | `metrics` | `true` | `GET /metrics` 指标端点(Prometheus 文本格式,零依赖) |
@@ -184,8 +186,17 @@ Web 面板(`http://127.0.0.1:8765/`)为只读,零依赖纯静态、可离线:
   问题由库自己收敛
 - 关闭反馈:`access_tracking: false`(recall 回到纯只读);dedup 阈值可经
   `scheduler.submit("dedup", payload={"threshold": 0.8})` 调整
-- 后续路线(参照 DSH 差距分析):superseded 显式化(LWW 覆盖留痕)、容量上限
-  与删除守卫、lessonize 教训写入协议
+- **superseded 显式化**(主动优化二期): 同键 LWW 覆盖不再是静默双行 —
+  旧行闭合(`valid_to = 新行 valid_from`)、新行记 `predecessor_id`(因果链
+  任务自动接续;归档在 365 天后自动收纳;图策略召回只取当前有效边,
+  被覆盖的旧值不再漏进上下文);相同值重复断言不触发覆盖
+- **容量治理与删除守卫**(主动优化二期): `max_records_per_scope`(0=关闭)
+  设定每 scope 配额,forget 每日把超额 scope 按留存分升序修剪;
+  `protect_importance`(默认 0.9)以上的高价值记忆豁免 forget/dedup 的一切
+  删除(显式 `confirm_protected: true` 可越过)— 对齐 DSH
+  "importance=3 需 confirm" 的删除守卫语义
+- 后续路线(参照 DSH 差距分析):lessonize 教训写入协议、错误指纹闭环、
+  WRITE_WRITE 之外冲突类型接入写入路径
 
 ### API Key 鉴权与库文件加密(§15.4)
 

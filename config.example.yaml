@@ -64,6 +64,14 @@ enable_scheduler: true
 # forget 据此"使用即续命(衰减锚点重置)+ 常用即升值(log10 加成,上限 3x)"
 access_tracking: true
 
+# 容量治理(主动优化二期): 每 scope 的 fragment 配额,forget 每日把超额 scope
+# 按留存分升序修剪到配额(受保护行豁免);0 = 关闭(默认)
+max_records_per_scope: 0
+
+# 删除守卫: importance ≥ 此值的记忆豁免 forget/dedup 的一切删除
+# (显式 payload confirm_protected: true 可越过);对应 DSH "importance=3 需 confirm"
+protect_importance: 0.9
+
 # ---------- 可观测性(全部安全默认值) ----------
 
 # GET /metrics 指标端点(Prometheus 文本格式,零依赖手写实现):

@@ -255,7 +255,8 @@ LLM 或重模型;均有 `Config` dataclass + `get_xxx()` 工厂
 | `Summarizer.summarize(text) -> str` | `RuleSummarizer`(截取+句读回退) | `LLMSummarizer`(OpenAI 兼容,env `SMILEX_SUMMARIZE_*`,GLM 附 thinking disabled,失败回退规则版;插入点 = summarize 调度任务) | `[llm]` |
 
 server 层 config.toml 对应开关:`embedder` / `reranker` / `fact_extractor` /
-`pii_masker` / `tracing` / `summarizer`。
+`pii_masker` / `tracing` / `summarizer` / `access_tracking` /
+`max_records_per_scope` / `protect_importance`。
 
 ## 6a. 可观测性子系统(`memory/observability/`)
 
@@ -335,7 +336,7 @@ semantic 各一模块 + `_common.py` 共享子句,`__init__.py` 的 `CoreTaskRun
 | 任务          | 行为                                                                                                    | 关键参数                              |
 | ----------- | ----------------------------------------------------------------------------------------------------- | --------------------------------- |
 | consolidate | L1 fragments 按 entity/scope 分组聚合,固化写入 L2(triples)                                                     | 分组 flush(H1)                      |
-| forget      | 留存分 `score = importance × 0.5^(age/half_life) × min(3, 1+log10(1+access_count))`,age 锚点取 max(updated\_at, last\_accessed\_at)(使用即续命+常用即升值);低于 threshold → 删除(默认)或降权 | half\_life\_days=30,threshold=0.1 |
+| forget      | 留存分 `score = importance × 0.5^(age/half_life) × min(3, 1+log10(1+access_count))`,age 锚点取 max(updated\_at, last\_accessed\_at)(使用即续命+常用即升值);低于 threshold → 删除(默认)或降权;删除守卫 importance ≥ protect\_importance(默认 0.9,confirm\_protected 可越过);尾段容量 pass: max\_per\_scope 超额修剪 | half\_life\_days=30,threshold=0.1,protect=0.9,max\_per\_scope=0(关) |
 | dedup       | 近重复合并(§ 主动优化): FTS trigram 短语找同 scope/layer 候选 + 字符 bigram Jaccard ≥ 0.7 确认;幸存者=较早 created\_at,吸收访问计数/时间区间/实体;重复行连同向量删除 | 每日 LOW,threshold=0.7,min\_length=12 |
 | summarize   | 规则式摘要(非 LLM),summary\_length 可调                                                                       | <br />                            |
 | causal      | 遍历 predecessor\_id 链维护 causal\_chains 表                                                               | <br />                            |
@@ -584,7 +585,7 @@ token_budget=4000 / enable_scheduler=true`,CLI 可覆盖 db/host/port):
 | SHARED / EXCLUSIVE / UPDATE 锁 | 读共享 / 写排他 / 中间态(先读后升级写)三档锁 |
 | 排序获取(acquire_many) | 多锁按资源名排序获取,从根本上消除循环等待死锁 |
 | 乐观版本检测 | 写时携带 expected/base version,CAS 风格比对;不符报 VERSION_STALE / WRITE_WRITE |
-| LWW / AUTO_LAST | Last-Write-Wins,冲突默认解法:后写覆盖 |
+| LWW / AUTO_LAST | Last-Write-Wins,冲突默认解法:后写覆盖;主动优化二期起覆盖显式化 — 旧行闭合 valid_to、新行记 predecessor_id(见 §6a 前的写入路径描述) |
 | WriteStatus.CONFLICT | 写入被拒(策略为 reject/manual 且检出冲突),不落库 |
 | 矛盾检测 | VALUE(逆谓词)/NUMERIC(数值重叠)/TEMPORAL(时间重叠)/CAUSAL(因果环)四类 |
 | ScopePromoter | 检测"多项目重复模式"并提升到 global(带最小项目数阈值) |

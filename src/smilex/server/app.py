@@ -61,9 +61,15 @@ def create_app(config: ServerConfig) -> FastAPI:
                     memory.engine,
                     observer=make_scheduler_observer(service.telemetry),
                 )
+                from ..memory.scheduler.tasks import CoreTaskConfig
+
                 register_core_tasks(
                     scheduler,
                     memory.engine,
+                    config=CoreTaskConfig(
+                        forget_max_per_scope=config.max_records_per_scope,
+                        forget_protect_importance=config.protect_importance,
+                    ),
                     summarizer=get_summarizer(
                         SummarizerConfig(backend=config.summarizer)
                     ),
