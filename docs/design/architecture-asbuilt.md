@@ -362,7 +362,18 @@ semantic 各一模块 + `_common.py` 共享子句,`__init__.py` 的 `CoreTaskRun
 类与函数/内外部依赖(标准库过滤,绝对导入按本目录/src 布局/仓库根
 顺序解析),其余扩展名读文件头注释兜底,
 文件/类/外部库分别落 `file:`/`class:`/`tech:` 实体)、跨项目克隆
-(`cross_project_cloner`)、主动学习(`active_learner`)。MCP `memory_init_project(project_path=...)`
+(`cross_project_cloner`;2026-09 强化: ①**向量重建** — middleware 注入
+vector_store,克隆/导入的新实体与新片段即时重嵌(名字/内容),
+`CloneResult.vectors_rebuilt/vectors_missing` 计数,消除了"快照不含
+向量 → 导入后 KNN 通道空转"的静默降级;②**merge 归并** — 目标已有
+同名实体(entity_id)归并进 ID 映射表,端点三元组改写指向既有实体而非
+静默丢弃;③**locations 对称化** — 随包导出/导入(新 ULID + parent
+层级 + 片段 location_id 改写;location_id 全表 UNIQUE,同 id 即同地点
+按全表归并);④包格式 1.1 + 版本兼容改"主版本相等且次版本 ≤ 当前",
+1.0 旧包可导入;⑤L3 语义社区缓存(fragment_id 前缀 `semantic:community:`)
+恒不复制 — 派生缓存 key 由源库实体 id 决定,克隆后必然失配,由
+semantic 任务重建;错误指纹表为设备本地数据不随包导出)、主动学习
+(`active_learner`)。MCP `memory_init_project(project_path=...)`
 与 CLI `smilex-memory init --scan` 经 `MemoryMiddleware.bootstrap_project`
 复用同一编排。
 

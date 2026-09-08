@@ -22,7 +22,9 @@ from smilex.memory.scheduler.bootstrap import (
     CloneResult,
     CrossProjectCloner,
 )
+from smilex.memory.scheduler.bootstrap.cross_project_cloner import PACKAGE_VERSION
 from smilex.memory.storage.storage_engine import StorageEngine
+from smilex.memory.storage.vector_store import VectorStore
 from smilex.middlewares import MemoryMiddleware
 
 _BASE = datetime(2026, 1, 1, tzinfo=UTC)
@@ -284,8 +286,9 @@ async def test_export_import_roundtrip(engine, tmp_path):
     assert export_result.fragment_count == 2
 
     payload = json.loads(pkg.read_text(encoding="utf-8"))
-    assert payload["version"] == "1.0"
+    assert payload["version"] == PACKAGE_VERSION
     assert payload["scope"] == SRC
+    assert "locations" in payload  # 1.1 包格式
     assert all("embedding" not in e for e in payload["entities"])  # ADR-022
 
     import_result = await cloner.import_package(pkg, DST)
@@ -340,3 +343,175 @@ async def test_middleware_clone_project():
         assert len(await _rows(engine, "entities", SRC)) == 1
     finally:
         await mw.close()
+
+
+# ---------- 向量重建 / merge 归并 / 版本兼容 / locations(A2) ----------
+
+
+@pytest.fixture
+async def vec_engine():
+    """带 vec 虚拟表的引擎(向量重建用例需要;开发环境 sqlite-vec 可用)."""
+    eng = StorageEngine(":memory:", load_vec=True)
+    await eng.initialize()
+    yield eng
+    await eng.close()
+
+
+async def test_clone_rebuilds_vectors(vec_engine):
+    """注入 vector_store 时克隆即时重嵌: 目标 scope KNN 通道可用,幂等不重复建."""
+    await _seed_source(vec_engine)
+    vs = VectorStore()
+    cloner = CrossProjectCloner(vec_engine, vector_store=vs)
+    result = await cloner.clone_to(SRC, DST, CloneFilter())
+    # 3 实体(名字)+ 2 片段(内容)全部重嵌
+    assert result.vectors_rebuilt == 5
+    assert result.vectors_missing == 0
+
+    hits = await vs.knn_search(vec_engine.conn, "Redis 缓存雪崩复盘", k=5)
+    frag_hits = {h.fragment_id for h in hits if h.fragment_id}
+    dst_frags = {f["id"] for f in await _rows(vec_engine, "temporal_fragments", DST)}
+    assert frag_hits & dst_frags  # 克隆出的片段可被 KNN 命中(内容精确匹配)
+
+    # 二次克隆幂等: 全部去重跳过,不重复建向量
+    result2 = await cloner.clone_to(SRC, DST, CloneFilter())
+    assert result2.vectors_rebuilt == 0
+    assert result2.entity_count == 0 and result2.fragment_count == 0
+
+
+async def test_clone_without_vector_store_reports_missing(engine):
+    """未注入 vector_store 是合法降级: 计入 vectors_missing,不算错误."""
+    await _seed_source(engine)
+    cloner = CrossProjectCloner(engine)
+    result = await cloner.clone_to(SRC, DST)
+    assert result.vectors_rebuilt == 0
+    assert result.vectors_missing == 5
+    assert not result.errors
+
+
+async def test_clone_vector_store_but_no_vec_table(engine):
+    """注入了 vector_store 但库未建 vec 表(load_vec=False)→ 降级 + errors 留痕."""
+    await _seed_source(engine)
+    cloner = CrossProjectCloner(engine, vector_store=VectorStore())
+    result = await cloner.clone_to(SRC, DST)
+    assert result.vectors_missing == 5
+    assert any("vec" in e for e in result.errors)
+
+
+async def test_import_merges_existing_entities(engine, tmp_path):
+    """merge 归并: 目标已有同名实体 → 端点三元组改写指向既有实体而非静默丢弃."""
+    await _seed_source(engine)
+    cloner = CrossProjectCloner(engine)
+    pkg = tmp_path / "snap.json"
+    await cloner.export_package(SRC, pkg)
+
+    existing_id = await _add_entity(engine, DST, "redis")
+    result = await cloner.import_package(pkg, DST)
+    assert result.entity_count == 2  # redis 归并跳过,alice/cache 新建
+    assert result.triple_count == 4  # t1/t3 端点 redis 归并改写,4 条全写入
+
+    b_triples = await _rows(engine, "triples", DST)
+    assert len(b_triples) == 4
+    redis_subject = {
+        t["subject_id"] for t in b_triples if t["predicate"] == "has_failure_mode"
+    }
+    assert redis_subject == {existing_id}  # 改写指向目标库既有实体
+
+
+async def test_import_accepts_v1_0_package(engine, tmp_path):
+    """1.0 旧包(无 locations)可导入;主版本不匹配仍拒绝."""
+    await _seed_source(engine)
+    cloner = CrossProjectCloner(engine)
+    pkg = tmp_path / "snap.json"
+    await cloner.export_package(SRC, pkg)
+
+    payload = json.loads(pkg.read_text(encoding="utf-8"))
+    payload["version"] = "1.0"
+    payload.pop("locations")
+    pkg.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    result = await cloner.import_package(pkg, DST)
+    assert result.entity_count == 3
+    assert result.location_count == 0  # 1.0 包无 locations,片段 location_id 置 NULL
+
+    payload["version"] = "2.0"
+    pkg.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    with pytest.raises(ValueError, match="版本"):
+        await cloner.import_package(pkg, DST)
+
+
+async def test_semantic_community_cache_excluded(engine):
+    """L3 语义社区缓存恒不克隆(key 由源库实体 id 决定,克隆后必然失配)."""
+    await _seed_source(engine)
+    await _add_fragment(
+        engine, SRC, "semantic:community:abc123",
+        "【语义社区】3 个实体 / 2 条关系", layer="L3",
+    )
+    cloner = CrossProjectCloner(engine)
+    result = await cloner.clone_to(SRC, DST)
+    assert result.fragment_count == 2  # 只有 L1/L2 两条
+    b_frags = await _rows(engine, "temporal_fragments", DST)
+    assert all(
+        not f["fragment_id"].startswith("semantic:community:") for f in b_frags
+    )
+
+
+async def test_locations_roundtrip(tmp_path):
+    """locations 随包导出/导入: 新 ULID + parent 层级改写 + 片段 location_id 改写."""
+    src_engine = StorageEngine(":memory:", load_vec=False)
+    await src_engine.initialize()
+    try:
+        conn = src_engine.conn
+        ts = "2026-01-01T00:00:00.000000Z"
+        await conn.execute(
+            "INSERT INTO locations(id, location_id, name, location_type, parent_id, "
+            "path, coordinates, scope, valid_from) VALUES "
+            "('loc1', 'office.floor2', '二层', 'area', NULL, 'office.floor2', "
+            "NULL, ?, ?)",
+            [SRC, ts],
+        )
+        await conn.execute(
+            "INSERT INTO locations(id, location_id, name, location_type, parent_id, "
+            "path, coordinates, scope, valid_from) VALUES "
+            "('loc2', 'office.floor2.desk', '工位', 'point', 'loc1', "
+            "'office.floor2.desk', NULL, ?, ?)",
+            [SRC, ts],
+        )
+        await _seed_source(src_engine)
+        await conn.execute(
+            "UPDATE temporal_fragments SET location_id = 'loc2' "
+            "WHERE fragment_id = 'frag-1'"
+        )
+        await conn.commit()
+
+        cloner = CrossProjectCloner(src_engine)
+        pkg = tmp_path / "snap.json"
+        await cloner.export_package(SRC, pkg)
+
+        # 导入全新库: locations 真实写入,id 全部重映射,层级/引用改写
+        dst_engine = StorageEngine(":memory:", load_vec=False)
+        await dst_engine.initialize()
+        try:
+            result = await CrossProjectCloner(dst_engine).import_package(pkg, DST)
+            assert result.location_count == 2
+
+            by_lid = {
+                loc["location_id"]: loc
+                for loc in await _rows(dst_engine, "locations", DST)
+            }
+            assert set(by_lid) == {"office.floor2", "office.floor2.desk"}
+            parent, child = by_lid["office.floor2"], by_lid["office.floor2.desk"]
+            assert parent["id"] != "loc1"  # 新 ULID
+            assert child["parent_id"] == parent["id"]  # 层级改写
+            dst_frags = {
+                f["fragment_id"]: f
+                for f in await _rows(dst_engine, "temporal_fragments", DST)
+            }
+            assert dst_frags["frag-1"]["location_id"] == child["id"]
+        finally:
+            await dst_engine.close()
+
+        # 同库再导入(其他 scope): location_id 全表归并,不撞 UNIQUE 约束
+        result2 = await cloner.import_package(pkg, "project:proj_c")
+        assert result2.location_count == 0
+        assert result2.skipped_count >= 2
+    finally:
+        await src_engine.close()

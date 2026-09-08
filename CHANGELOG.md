@@ -8,6 +8,29 @@
 
 ### Added
 
+- **克隆/导入向量重建 + merge 归并 + locations 对称化(快照迁移路径补全)**:
+  - `CrossProjectCloner` 构造新增可选 `vector_store` 参数(middleware
+    `clone_project` 装配点注入): 克隆/导入的每个新实体(名字)与新片段
+    (内容)即时重嵌向量,消除"快照不含向量(ADR-022)→ 导入后 KNN 通道
+    空转、检索静默退化为纯 BM25"的功能性缺陷;`CloneResult` 新增
+    `vectors_rebuilt/vectors_missing` 计数,未注入或库未建 vec 表时
+    降级不中断(vec 缺表记入 errors);幂等: 二次导入全去重跳过,
+    不重复建向量
+  - **merge 归并修复**(静默丢数据): 目标库已有同名实体(entity_id)
+    时归并进 ID 映射表(源 id → 既有实体 id),端点三元组与片段引用
+    改写指向既有实体,不再整条丢弃;三元组全键去重语义保留
+  - **locations 对称化**: 快照包格式 1.1 新增 `locations` 数组,
+    导入做新 ULID + parent_id 两阶段层级改写 + 片段 location_id 改写
+    (替换原硬编码 NULL;1.0 旧包无 locations 按空列表处理);
+    location_id 全表 UNIQUE → 同 id 即同地点,按全表归并防撞约束
+  - 版本兼容从硬等值改为「主版本相等且次版本 ≤ 当前」(1.0 旧包可
+    导入,主版本不匹配/次版本更新拒绝并给清晰报错)
+  - L3 语义社区缓存(fragment_id 前缀 `semantic:community:`)恒不进
+    克隆/快照: 缓存 key = md5(源库实体 id 排序),克隆后必然失配,
+    由 semantic 任务在目标 scope 重建
+  - 错误指纹表(error_fingerprints)为设备本地数据不随包导出 —
+    scope 折进指纹哈希无法按 scope 过滤,全表带出会泄漏其他 scope
+
 - **图检索服务化出口(修复 L2 图谱/时序策略在服务路径不可达)**:
   - MCP `memory_recall` 新增可选聚焦参数 `entity`(实体名/归一化
     entity_id/ULID,经 `mcp_server.resolve_entity_ref` 只读解析 —

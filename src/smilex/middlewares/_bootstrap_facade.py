@@ -234,9 +234,11 @@ class _BootstrapFacadeMixin:
         )
 
         target_scope = scope_path(MemoryScope.PROJECT, generate_id())
-        result = await CrossProjectCloner(self._engine).clone_to(
-            source_scope, target_scope, clone_filter
-        )
+        # 注入 vector_store: 克隆的新实体/新片段即时重嵌向量,
+        # 避免克隆出的 scope 只有 FTS 单通道(ADR-022 重建是一等公民)
+        result = await CrossProjectCloner(
+            self._engine, vector_store=self._vector_store
+        ).clone_to(source_scope, target_scope, clone_filter)
         if target_name:
             from ..memory.scheduler.bootstrap.seeds import (  # 延迟导入: 同上
                 EntitySeed,
