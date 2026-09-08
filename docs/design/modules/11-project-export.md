@@ -6,6 +6,46 @@
 
 ---
 
+## ★ 修订记录(2026-09-08,对照 as-built 复核)
+
+本文写于 2026-06,面向"团队协作/开源分享"想象了较重的形态。模式 B 轻量版
+已于 2026-08-21 落地(`cross_project_cloner.export_package/import_package`),
+并在 2026-09 完成强化。**下文阅读以本节修正为准**:
+
+**已落地且与本文偏离**(详见 §4 修订):
+- 快照含 fragments(本文格式漏了 L1 主体,按原格式是不可恢复的快照)与
+  locations;包格式 1.1;版本兼容为"主版本相等且次版本 ≤ 当前"
+- **向量重建是一等公民**: 导入/克隆时注入 VectorStore 即时重嵌新实体
+  (名字)与新片段(内容),`CloneResult.vectors_rebuilt/vectors_missing`
+  计数(ADR-022 缓解措施从注释变为落地)
+- **merge 归并语义**: 目标已有同名实体(entity_id)归并进 ID 映射表,
+  端点三元组改写指向既有实体,不再静默丢弃
+- L3 语义社区缓存(fragment_id 前缀 `semantic:community:`)恒不进快照
+  (派生缓存 key 由源库实体 id 决定,重映射后必然失配)
+- error_fingerprints 为**设备本地数据不随包导出**: scope 折进指纹哈希,
+  无法按 scope 过滤,全表带出会泄漏其他 scope;教训 fragment 本身随
+  片段走(教训闭环的"计数"留在源设备,内容可迁移)
+
+**否决/砍掉的部分**(对照"单用户嵌入式、跨机器迁移/备份"真实场景):
+- export.yaml 全量 DSL → 少量 CLI flag 覆盖(手动触发的导出不需要 80 行
+  YAML;filter 里的 edge_kind/min_confidence 依赖从未落地的建模约定)
+- 六套 Agent 约定路径矩阵(Cursor/Copilot/Aider/Continue/Cline/Windsurf)
+  → 收敛 AGENTS.md + CLAUDE.md 两个目标 + ADR/lessons 两三个模板
+- 增量导出(`--incremental`)→ 为不存在的规模做设计(快照秒级全量重导)
+- Git hook 代提交(pre-push `git add + commit --no-verify`)→
+  高风险自动化,单用户收益不抵风险
+- 反向 Markdown 导入(CLAUDE.md LLM 提取回写)→ 与 bulk_importer 的
+  markdown 通道职责重叠,无质量验收设计
+- 按社区组织 ADR(§13.2)→ 连通分量 ≠ 架构主题,且反向依赖调度任务产物
+- PiiRedactor 中文名正则(§8)→ 中文姓名正则基本不可行,复用已实现的
+  RegexPIIMasker(高置信类别 + 校验位)
+
+**改写**: 模式 C(MCP Server)不再需要"实现" — 现状 server 层已有
+memory_recall/write/init_project/graph_query/report_error/stats 六工具
+(stdio + streamable-http),本文写作时对服务层现状失察。
+
+---
+
 ## 0. 问题诊断：为什么需要导出？
 
 ### 0.1 典型场景
@@ -63,6 +103,13 @@
 ---
 
 ## 2. 模式 A：静态文件导出（核心）
+
+> **2026-09 修订**: 按单用户嵌入式场景收敛 — 目标矩阵砍至
+> AGENTS.md + CLAUDE.md 两个约定路径 + ADR/lessons 两三个 Jinja 模板,
+> 配置从 export.yaml 全量 DSL 砍至少量 CLI flag;下文的六套路径矩阵、
+> DSL、Git hook 代提交、增量导出、反向 Markdown 导入保留为历史参考,
+> 状态见顶部修订记录(全部 rejected/deferred 及理由)。未实现的
+> get_project_overview/get_glossary 等查询接口仍是本模式的真实成本。
 
 ### 2.1 标准文件约定（多 Agent 兼容）
 
@@ -513,87 +560,120 @@ src/smilex/export/templates/
 
 ## 4. 模式 B：完整快照
 
-### 4.1 快照格式
+> **2026-09 修订**: 本节格式已按 as-built 实现(cloner + schema v15)
+> 重写;原 2026-06 格式(edge_kind/provenance/reflections 等虚构字段,
+> 且漏了 fragments)作废,见顶部修订记录。
+
+### 4.1 快照格式(包格式 1.1,已落地)
 
 ```json
 {
-  "version": "1.0",
-  "generated_at": "2026-06-21T15:30:00Z",
+  "version": "1.1",
+  "generated_at": "2026-09-08T15:30:00Z",
   "scope": "project:my-web-app",
-  "smilex_version": "0.1.0",
-  
-  "metadata": {
-    "entity_count": 1234,
-    "triple_count": 5678,
-    "reflection_count": 89,
-    "exported_by": "smilex export --snapshot"
-  },
-  
+
   "entities": [
     {
       "id": "01HXY...",
+      "entity_id": "tech:fastapi",
+      "entity_type": "concept",
       "name": "FastAPI",
-      "normalized_name": "fastapi",
-      "entity_type": "tech",
-      "scope": "project:my-web-app",
-      "embedding_included": false,
-      "created_at": "2026-06-15T..."
+      "valid_from": "2026-06-15T...",
+      "valid_to": null,
+      "source_closet": "01HXY...(源库溯源)"
     }
   ],
-  
+
   "triples": [
     {
+      "id": "01HXZ...",
+      "triple_id": "01HXY...|uses|01HYZ...",
       "subject_id": "01HXY...",
       "predicate": "uses",
       "object_id": "01HYZ...",
-      "edge_kind": "semantic",
-      "edge_properties": {},
-      "provenance": "extracted",
-      "confidence": 0.95,
-      "valid_from": "2026-06-15T..."
+      "object_value": null,
+      "valid_from": "...", "valid_to": null,
+      "predecessor_id": null, "causal_level": 0,
+      "confidence": 1.0, "certainty": "exact",
+      "relation_type": "semantic",
+      "source_closet": "..."
     }
   ],
-  
-  "reflections": [
+
+  "fragments": [
     {
-      "type": "failure",
-      "key_lesson": "...",
-      "what_was_expected": "...",
-      "what_actually_happened": "...",
-      "why_it_happened": "...",
-      "what_to_do_differently": "...",
-      "related_skills": ["redis", "capacity_planning"]
+      "id": "01HY0...", "fragment_id": "text:a1b2c3...",
+      "time_start": "...", "time_end": null,
+      "location_id": "01HY1...",
+      "content": "【教训】...",
+      "entities": ["01HXY..."], "relations": ["01HXZ..."],
+      "layer": "L1", "importance": 0.95,
+      "created_at": "...", "updated_at": "..."
     }
   ],
-  
-  "schema_version": "1.0",
-  "compatible_smilex_versions": ">=0.1.0"
+
+  "locations": [
+    {
+      "id": "01HY1...", "location_id": "office.floor2",
+      "name": "二层", "location_type": "area",
+      "parent_id": null, "path": "office.floor2",
+      "coordinates": null, "valid_from": "...", "valid_to": null
+    }
+  ]
 }
 ```
+
+**导入语义(已落地)**:
+
+- 版本兼容: 主版本相等且次版本 ≤ 当前可导入(1.0 旧包无 locations,
+  按空列表处理,片段 location_id 置 NULL);主版本不匹配/次版本更新拒绝
+- ID 全部重新生成(新 ULID);实体/三元组/片段/位置间的引用经统一映射表
+  改写;前驱链与位置层级两阶段改写
+- 幂等: 实体按 entity_id、三元组按全键、片段按 fragment_id、位置按
+  location_id(全表 UNIQUE,同 id 即同地点)去重
+- **merge 归并**: 目标已有同名实体 → 归并进映射表,端点三元组改写指向
+  既有实体(不静默丢弃)
+- **向量重建**: 导入方注入 VectorStore 时新实体/新片段即时重嵌,
+  CloneResult 报告 vectors_rebuilt/vectors_missing(ADR-022)
+- 导入/克隆目标禁止 global(防通用知识污染,通用化走 ScopePromoter)
 
 ### 4.2 快照用途
 
 | 用途 | 说明 |
 |------|------|
 | **备份** | 定期备份到 Git，灾难恢复 |
-| **迁移** | 转移到其他项目 / 其他用户 |
-| **导入** | 新用户 `smilex import snapshot.json` 快速建立记忆 |
+| **迁移** | 转移到其他项目 / 其他机器 / 其他用户 |
+| **导入** | `import_package` 快速建立记忆(库级 API;CLI/MCP 入口待补) |
 | **审计** | 历史时点完整状态 |
 
-### 4.3 快照排除项
+### 4.3 快照排除项(已落地语义)
 
-```yaml
-snapshot_excludes:
-  - vectors             # 体积大，可重建
-  - l0_snapshot         # 临时工作记忆
-  - checkpoints         # 任务执行状态
-  - personal:goals      # 个人目标（隐私）
-  - personal:reflection # 个人复盘（隐私，除非显式启用）
+```
+排除:
+  vectors               — 不进 JSON(ADR-022);导入时即时重嵌(而非"后台异步")
+  l0_snapshot           — 进程内会话工作记忆(cachebox)
+  checkpoints           — 任务执行状态(设备本地)
+  error_fingerprints    — 教训计数闭环设备本地(scope 折进指纹哈希无法按
+                          scope 过滤;教训 fragment 内容随片段走)
+  L3 语义社区缓存       — semantic:community:* 派生缓存,key 重映射后失配,
+                          目标 scope 由 semantic 任务重建
+  归档表(archive)       — 现版本仅导热数据;含归档为待办决策
+                          (365/180 天阈值下老项目相当比例历史在归档区,
+                          迁移=丢冷记忆,应显式声明或补含归档开关)
+保留(本文未列但实现已含):
+  fragments(全文) / locations / access_count 相关列在表内随行
 ```
 
 ---
 
 ## 5. 模式 C：MCP Server（实时协作）
+
+> **2026-09 改写**: 本模式**不需要再实现** — 现状 server 层已提供
+> stdio(`smilex-memory mcp`)与 streamable-http(`smilex-memory serve`,
+> 挂 `/mcp`)两种传输,工具面含 memory_recall(带 entity/time 聚焦)/
+> memory_write/memory_init_project/memory_graph_query/
+> memory_report_error/memory_stats。下文工具定义保留为历史参考,
+> 实际以 as-built §11 为准。
 
 ### 5.1 工作模式
 
@@ -1011,33 +1091,50 @@ git push private-backup
 
 ## 12. 关键决策（ADR）
 
+> **2026-09 修订**: ADR-019/021 按顶部修订记录收敛(回退项已砍),
+> ADR-022 改写为落地语义;编号与 08 号文档 ADR-015~018、主文档
+> §17(已回填)连续。
+
 ### ADR-019: 导出采用"标准文件约定"而非自定义路径
 
-- **选择**：导出到 CLAUDE.md、.cursor/rules/ 等约定路径
-- **理由**：兼容主流 Agent，零配置即可被消费
-- **权衡**：文件路径固定，灵活性低
-- **回退**：通过 export.yaml 可自定义
+- **选择（修订后）**：收敛为 AGENTS.md + CLAUDE.md 两个约定路径
+  （原设计六套 Agent 路径矩阵砍掉:单用户场景命中面极窄,长尾维护负担）
+- **理由**：兼容主流 Agent，零配置即可被消费;两个目标覆盖 90% 价值
+- **权衡**：Cursor/Copilot 等专有路径用户自行复制
+- **回退**：~~export.yaml 可自定义~~(DSL 已否决) → 少量 CLI flag
 
 ### ADR-020: 默认单向导出，不做双向同步
 
 - **选择**：SmileX → 项目仓库（单向）
 - **理由**：双向同步会有冲突复杂度；导出内容是"快照"，非"源"
 - **权衡**：用户改了 CLAUDE.md 不会自动回写 SmileX
-- **缓解**：提供 `smilex import --from CLAUDE.md` 反向导入
+- **缓解**：~~提供 `smilex import --from CLAUDE.md` 反向导入~~
+  (反向 Markdown 导入已否决 — 与 bulk_importer 的 markdown 通道
+  职责重叠且无质量验收设计;入库统一走导入通道)
 
 ### ADR-021: 隐私分级而非单开关
 
-- **选择**：public / internal / private 三级
-- **理由**：开源、内部、个人三种场景差异大
-- **权衡**：用户需理解三级的差异
-- **回退**：默认 internal，覆盖大部分场景
+- **选择（修订后）**：简化为"含/不含个人区"两档 + 复用已实现的
+  RegexPIIMasker(高置信类别 + 校验位;原 PiiRedactor 的中文人名正则
+  不可行,已否决)
+- **理由**：三级分类在单用户场景区分度不足;PII 治理已有生产实现
+- **权衡**：开源分享场景需配合人工 review
+- **回退**：默认不含个人区
 
-### ADR-022: 完整快照排除向量
+### ADR-022: 完整快照排除向量(2026-09 改写)
 
-- **选择**：snapshot.json 不含 embedding
-- **理由**：向量体积大（10K 实体 = 60MB），且可重建
-- **权衡**：导入后需重新计算向量（耗时）
-- **缓解**：导入时后台异步重建
+- **选择**：快照 JSON 不含 embedding;**向量重建是导入/克隆流程的
+  一等公民** — 注入 VectorStore 时新实体(名字)与新片段(内容)即时
+  重嵌,CloneResult 报告 vectors_rebuilt/vectors_missing,
+  未注入/无 vec 表时降级计数不中断
+- **理由**：向量进 JSON 体积膨胀(indent=2 明文 4KB/条);本地 BGE-M3
+  重嵌分钟级,"导入后立即可检"优于"包里带着但不能直接用";
+  原设计真正缺的不是"是否带向量"而是"重建缺位"(2026-08 落地版的
+  头注释承诺了不存在的 rebuild 接口,导致导入后 KNN 通道静默空转)
+- **权衡**：导出方与导入方 embedder 不同时向量语义有差异
+  (hash 默认无语义,语义后端建议两侧一致)
+- **回退**：全量迁移档位可用 SQLite 在线备份(VACUUM INTO/backup API),
+  单文件库迁移场景下与 JSON 包互补,按需再议
 
 ---
 
@@ -1058,6 +1155,10 @@ git push private-backup
 
 ### 13.2 与社区检测的协同
 
+> **2026-09 否决**: 连通分量 ≠ 架构主题(semantic 任务的社区是图论
+> 连通性,不是主题模型),且使导出反向依赖调度任务产物 — 派生缓存
+> (semantic:community:*)已恒不进快照。下文保留为历史参考。
+
 ```
 导出 ADR 时：
   - 按社区组织（同一架构主题的决策放一起）
@@ -1066,6 +1167,10 @@ git push private-backup
 ```
 
 ### 13.3 与增量索引的协同
+
+> **2026-09 否决**: 增量导出为不存在的规模做设计(快照秒级全量重导,
+> 文档自估 1-5 MB);导入幂等已由内容寻址(fragment_id)承担。
+> 下文保留为历史参考。
 
 ```
 导出触发：

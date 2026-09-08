@@ -6,6 +6,26 @@
 
 ---
 
+## ★ 修订记录(2026-09-08,对照 as-built 复核)
+
+本文写作时(2026-06)的现状快照与成本模型已失真,且部分建议经评审后被
+否决或改向。**阅读下文各节时以本节修正为准**:
+
+| 原建议 | as-built 状态(2026-09) | 修订结论 |
+|--------|------------------------|---------|
+| P0-1 Triple 缺 edge_kind/edge_properties/provenance | **约 70% 伪差距**: triples 已是 15 字段,`relation_type` 7 值 CHECK 就是 EdgeKind 前身(semantic/causal/temporal/spatial 已覆盖,另承担状态跟踪 3 值,见 GAPS D6) | 剩余边类型(REFERENCE/CONTAINS/DERIVED_FROM/CONTRADICTS/SIMILAR_TO)若需要,扩 relation_type CHECK(D6 先例),**不另起 edge_kind 列**;edge_properties/provenance **否决** — certainty 5 值 + confidence 数值 + 07 号文档阈值剪枝已覆盖噪声治理,观察计数已有 fragment 层 access_count 闭环(schema 014) |
+| P0-2 增量索引缺失 | **等效落地约 60%**: bulk_importer 以 `text:{sha256[:16]}`/`git:{hash}`/`md:{路径}` 内容寻址 fragment_id,重跑幂等跳过;目录扫描跳过构建目录 + max_files 截断 | §6.1 成本模型前提不成立(导入路径是确定性 AST/git-log 解析,不存在"每周全量 LLM 重提取"基数);`.smilexignore`/git-diff 精细化按需再议 |
+| P1 社区检测 | **轻量版已落地**(semantic 任务: nx.connected_components → L3 fragment 缓存);但连通分量是零分辨率 — 记忆图易连成巨分量使输出退化 | **保留但改向**: networkx 内置 `louvain_communities`(不引入 igraph/leidenalg 两个 C 扩展)+ 固定 seed(确定性/幂等要求)+ 摘要复用 Summarizer Protocol(默认规则版零 LLM)+ 结果经 VectorStore 写向量(修复 L3 不进 KNN);保留懒增量触发与懒生成摘要两个设计;Community 数据模型收敛为 EntityCommunity 多对多表(删 member_entity_ids 列表列);"L3.5"命名作废,统一 L3 |
+| P1 三模式检索路由(QueryRouter) | 未落地,且设计有 bug:`"?" in query and len(query.split())>10` 对中文永不触发(无空格) | **否决**: 每查询一次 LLM 分类违反"core 零 LLM";Basic/Local 与现有双通道+图谱策略重复;Global 做成 recall 显式 `mode=overview` 参数交给调用方;DRIFT 是 1M token 语料的设计,单库 10K 实体近似多余 |
+| P1 Shortcut 边 | 未落地 | **从 P1 删除**(或降至 P3、以 BFS 实测超预算为触发条件): 依赖未落地的 contains 边型与社区检测,150K 实体 + depth≤2 + LIMIT 20 下 CTE BFS 大概率毫秒级 — CPG 技术解决不了的问题在此不存在 |
+| P2 声明式 DSL | 未落地 | **否决**: 示例 `where(lambda e: ...)` 自身无法编译为 SQL;relation_type 仅 7 值 + 谓词自由文本撑不起一门语言;2026-09 服务化出口(memory_recall 聚焦参数 + memory_graph_query 结构化工具 + relation_types 过滤)已覆盖其约 80% 真实需求;消费者是 LLM agent,它要参数化工具,不要学私有 DSL |
+| P2 SCIP/MCP 适配 | 未做,ADR-018 方向被遵守(源码导入仅 AST,无 CFG/DDG) | 维持 |
+
+ADR-015~018 按上表结论修订后回填主文档 §17(原四个 ADR 从未回填,编号与
+11 号文档 ADR-019~022 连续)。§5 路线图与 §8.4 执行顺序已被本节取代。
+
+---
+
 ## 0. 执行摘要（先看结论）
 
 ### SmileX 当前能力评估
@@ -27,6 +47,10 @@
 ```
 
 ### 7 个关键不足（按优先级）
+
+> **2026-09 复核**: 下表为 2026-06 视角,其中 3 项 P0 已由 relation_type
+> 7 值 + 内容寻址导入**等效落地**(详见顶部修订记录),P1 的
+> QueryRouter/Shortcut 边已否决,社区检测改向 networkx Louvain 轻量版。
 
 | 优先级 | 不足 | 来源品类 | 影响 |
 |--------|------|---------|------|
@@ -599,6 +623,10 @@ results = (
 
 ## 5. 实施路线图
 
+> **2026-09 修订**: 原三阶段路线已被顶部修订记录取代 — P0 两项标记
+> 等效落地,P1 收敛为"社区检测 Louvain 轻量版"单项,P2 DSL/Shortcut
+> 否决。保留下表仅为历史参考。
+
 ### P0（MVP 必做，1 周）
 
 | 任务 | 工作量 | 来源 |
@@ -667,12 +695,20 @@ results = (
 
 ## 7. 关键决策（ADR 补充）
 
+> **2026-09 修订**: 四个 ADR 按修订结论回填主文档 §17(原文未回填,
+> 编号与 11 号文档 ADR-019~022 连续)。各 ADR 末尾的
+> "**2026-09 状态**"行以 as-built 为准。
+
 ### ADR-015: Triple 升级为属性多重图（借鉴 CPG）
 
 - **选择**：Triple 加 `edge_kind` 枚举 + `edge_properties` 字典 + `provenance` 分级
 - **理由**：CPG 的多图融合是验证过的设计；graphrag-code 的 provenance 分级精准降噪
 - **权衡**：Triple 表 schema 变复杂，但查询能力大幅提升
 - **回退**：保留 `edge_kind='semantic'` 默认值，向后兼容
+- **2026-09 状态**: **部分等效落地,余项否决** — relation_type 7 值 CHECK
+  已承担 EdgeKind 语义(含状态跟踪扩展,D6 先例);edge_properties/
+  provenance 否决(certainty+confidence+阈值剪枝已覆盖);剩余边类型
+  按需扩 relation_type CHECK,不另起列
 
 ### ADR-016: 引入社区检测（借鉴 GraphRAG）
 
@@ -681,6 +717,10 @@ results = (
 - **权衡**：增加约 15% 代码复杂度；社区摘要需 LLM 调用
 - **缓解**：小模型 + 懒生成 + 增量触发，成本可控（< $1/项目/月）
 - **回退**：若社区摘要质量差，关闭自动摘要，仅保留聚类用于检索加速
+- **2026-09 状态**: **改向后保留** — 连通分量轻量版已落地(semantic
+  任务,L3 fragment 缓存);升级路径改为 networkx 内置
+  louvain_communities + 固定 seed(不引入 igraph/leidenalg)+ Summarizer
+  Protocol 摘要 + VectorStore 写向量(修 L3 不进 KNN);"L3.5"命名作废
 
 ### ADR-017: 增量索引（借鉴 graphrag-code + Cursor）
 
@@ -688,6 +728,9 @@ results = (
 - **理由**：减少 95% LLM 调用；冷启动速度提升 10x
 - **权衡**：需维护文件哈希表
 - **回退**：无（向后兼容，首次全量建立缓存）
+- **2026-09 状态**: **等效落地** — bulk_importer 内容寻址 fragment_id
+  (text:{sha256} / git:{hash} / md:{路径})重跑幂等;成本模型前提
+  (周期性全量 LLM 重提取)不成立,导入路径为确定性解析
 
 ### ADR-018: 不自建代码图谱（借鉴 SCIP 生态）
 
@@ -695,6 +738,9 @@ results = (
 - **理由**：SCIP 生态成熟（87 种 Kind、10 种索引器）；自建会爆炸
 - **权衡**：依赖外部工具（KGraph/graphrag-code）
 - **回退**：若 MCP 生态不成熟，P3 评估自建精简版（仅 tree-sitter）
+- **2026-09 状态**: **维持并遵守** — 源码导入仅 AST 产 file:/class:/
+  tech: 实体,无 CFG/DDG;MCP 适配器按需再做,"不自建、做消费者"原则
+  同样适用于查询语言(否决 DSL)与依赖选型(否决 igraph)
 
 ---
 
@@ -732,15 +778,23 @@ results = (
 
 ### 8.4 推荐执行顺序
 
+> **2026-09 修订版**(原版已被顶部修订记录取代):
+
 ```
-立即执行 P0（1 周）：
-  Triple 升级 + 增量索引 → 立即降低 95% LLM 成本
+已完成(2026-09):
+  服务化出口 — memory_recall entity/time 聚焦参数 +
+  memory_graph_query(path/neighbors/causal + relation_types 过滤),
+  L2 图谱/时序策略接出服务层;导入路径内容寻址幂等(增量索引等效)
 
-MVP 后跟进 P1（2 周）：
-  社区检测 + 多模式检索 → 解锁宏观问题能力
+下一步(若推进,1 周内):
+  社区检测轻量版 — semantic 任务从连通分量升级为 networkx
+  louvain_communities(固定 seed),摘要走 Summarizer Protocol,
+  结果经 VectorStore 写向量(修 L3 不进 KNN) — 这是 P1 里唯一
+  站得住的推进理由(巨分量退化是当前轻量版价值有限的根因)
 
-按需推进 P2：
-  声明式 DSL + MCP 适配 → 提升表达力与生态
+否决/搁置:
+  DSL(参数化工具覆盖) · QueryRouter(零 LLM 决策 + 中文规则 bug)
+  · Shortcut 边(依赖链不自洽,规模错配) · igraph/leidenalg 依赖
 ```
 
 ---

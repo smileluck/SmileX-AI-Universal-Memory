@@ -1579,6 +1579,44 @@ async function initialize_project(meta, template=None):
 - **权衡**：增加 15% 代码复杂度
 - **回退**：主动学习反感时提供"跳过向导"
 
+### ADR-015: Triple 属性多重图（08 号文档提案,2026-09 修订回填）
+
+- **选择（修订后）**：不另起 `edge_kind`/`edge_properties`/`provenance` 列 —
+  `relation_type` 7 值 CHECK 已承担边类型语义（图谱 4 值 + 状态跟踪 3 值,
+  决策 D6）,噪声治理由 certainty + confidence + 阈值剪枝（07 号文档）+ fragment
+  层 access_count 反馈闭环（schema 014）覆盖;剩余边类型按需扩 CHECK
+- **理由**：原提案基于失真现状快照（08 号文档 §3.1）;双轨列造成查询/触发器分裂
+- **权衡**：边属性进 fragment 内容或既有置信度列,表达力略降,换 schema 稳定
+
+### ADR-016: 社区检测（08 号文档提案,2026-09 修订回填）
+
+- **选择（修订后）**：semantic 任务连通分量轻量版已落地（L3 fragment 缓存）;
+  升级路径为 networkx 内置 `louvain_communities` + 固定 seed + Summarizer
+  Protocol 摘要 + 经 VectorStore 写向量,不引入 igraph/leidenalg
+- **理由**：连通分量零分辨率,记忆图易连成巨分量使社区输出退化 —
+  模块度聚类是唯一站得住的推进理由;"不自建、做消费者"同样适用于依赖选型
+- **权衡**：Leiden 相对 Louvain 的 refinement 优势在"社区用于检索摘要"场景无关紧要
+- **回退**：Louvain 随机性以固定 seed 消除,保持任务幂等
+
+### ADR-017: 增量索引（08 号文档提案,2026-09 修订回填）
+
+- **选择（修订后）**：等效落地为内容寻址导入 — bulk_importer 以
+  `text:{sha256[:16]}` / `git:{repo}:{hash}` / `md:{路径}` 为 fragment_id,
+  重跑幂等跳过;目录扫描跳过构建目录 + max_files 截断
+- **理由**：导入路径为确定性解析（AST/git-log/markdown）,原"每周全量
+  LLM 重提取省 95%"的成本模型前提不成立
+- **权衡**：文件级 SHA256 缓存表与 .smilexignore 精细化按需再议,不为
+  不存在的成本做设计
+
+### ADR-018: 不自建代码图谱（08 号文档,2026-09 回填）
+
+- **选择**：源码导入仅 AST 产 `file:`/`class:`/`tech:` 实体,无 CFG/DDG;
+  SCIP 生态做消费者而非自建;"不自建"原则同样适用于查询语言
+  （否决私有 DSL,2026-09 服务化出口以参数化工具覆盖）与依赖选型
+  （否决 igraph,消费已有 networkx）
+- **理由**：SCIP 生态成熟;CPG 规模（千万节点/JVM）与嵌入式定位冲突
+- **回退**：MCP 生态不成熟时 P3 评估 tree-sitter 精简版
+
 ---
 
 ## §18 工程目录结构 [MVP]
