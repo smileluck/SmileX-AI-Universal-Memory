@@ -23,6 +23,10 @@ _GUIDE_TEXT = f"""
 
 - **回答涉及项目事实、历史决策、个人偏好的问题前**,先调 `memory_recall(query)` 获取上下文
 - **任务完成或得到新结论后**,调 `memory_write(content, entities?, relations?)` 沉淀
+- **遇到报错/任务失败时**,调 `memory_report_error(code, message)`:响应含 `lesson`
+  则直接遵循;`should_write_lesson=true` 时排查后用
+  `memory_write(content, error_fingerprint=<指纹>)` 沉淀教训(写清错误原因/
+  失败条件与适用边界/可保留做法,禁止把条件性失败记成绝对结论)
 - 首次接触本项目时调 `memory_init_project(name, project_path="<项目根>")` 完成冷启动:
   自动读 README + 导入 git 历史/markdown 文档/源码结构为初始记忆
   (幂等;stdio 模式可省略 project_path)

@@ -278,7 +278,7 @@ server 层 config.toml 对应开关:`embedder` / `reranker` / `fact_extractor` /
 
 ## 7. 存储层
 
-单文件 SQLite,`SCHEMA_VERSION = 14`。引擎
+单文件 SQLite,`SCHEMA_VERSION = 15`。引擎
 (`storage/sqlite_engine.py`):aiosqlite + `DEFAULT_PRAGMAS`
 (WAL / synchronous=NORMAL / temp\_store=MEMORY / mmap 256MB /
 cache 64MB / foreign\_keys / busy\_timeout 5000ms);迁移按
@@ -299,6 +299,7 @@ cache 64MB / foreign\_keys / busy\_timeout 5000ms);迁移按
 | 012     | 性能索引                       | <br />                                                                     |
 | 013     | fts\_fragments             | FTS5 external-content,trigram;INSERT/UPDATE/DELETE 触发器保持同步;`rebuild` 回填老数据 |
 | 014     | access\_stats               | temporal_fragments 增 access_count/last_accessed_at(检索反馈闭环;FTS 触发器只在 UPDATE OF content 联动,计数不扰索引) |
+| 015     | error\_fingerprints          | 错误指纹注册表(sha256(scope\|code\|归一msg)[:16] 主键,count/lesson\_id;教训闭环) |
 
 查询模块(`queries/`,全部接收 `aiosqlite.Connection`,事务由调用方管理):
 
@@ -398,7 +399,8 @@ token_budget=4000 / enable_scheduler=true`,CLI 可覆盖 db/host/port):
   `memory_init_project(name, project_path, scan_git, scan_markdown,
   scan_code, max_commits, ...)`(冷启动+扫描生成初始记忆;stdio 模式
   project_path 缺省时按 db 路径 `<项目根>/.smilex/memory.db` 推断,
-  HTTP 模式需显式传参)/ `memory_stats`;Reranker/Extractor 按 config
+  HTTP 模式需显式传参)/ `memory_stats`/ `memory_report_error`(错误指纹
+  登记与教训闭环,见 server/lessons.py);Reranker/Extractor 按 config
   工厂构造注入
 - **REST**(`api.py`):`GET /stats` `/memories` `/memory/{id}`
   `/tasks` + `POST /recall-test`

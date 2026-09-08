@@ -6,7 +6,10 @@
 
 工具约定(返回 JSON 文本):
 - memory_recall: 检索记忆上下文(回答涉及项目事实/历史决策前先调)
-- memory_write: 沉淀新事实/结论(任务完成、得到新决策时调)
+- memory_write: 沉淀新事实/结论(任务完成、得到新决策时调;带
+  error_fingerprint 时按教训协议写【教训】并回链错误指纹)
+- memory_report_error: 错误指纹登记(出错时调;同指纹第 2 次起提示沉淀
+  教训,已有教训则直接回传内容)
 - memory_init_project: 新项目冷启动 + 扫描生成初始记忆(README/git 历史/
   markdown 文档/源码结构;project_path 缺省时 stdio 模式按 db 路径推断项目根)
 - memory_stats: 各层记忆计数(调试/面板)
@@ -36,6 +39,14 @@ from ..middlewares.dto import (
 )
 from ..middlewares.memory import MemoryMiddleware
 from .config import ServerConfig
+from .lessons import (
+    build_advice,
+    link_lesson,
+    load_lesson_content,
+    prepare_lesson_write,
+    register_error,
+    resolve_scope_str,
+)
 from .stats import collect_stats
 
 if TYPE_CHECKING:
@@ -213,6 +224,10 @@ def create_mcp_server(service: MemoryService) -> MCPServer:
         instructions=(
             "涉及项目事实、历史决策、个人偏好时先调 memory_recall 获取上下文;"
             "任务完成或得到新结论后调 memory_write 沉淀。"
+            "遇到报错/失败时调 memory_report_error(code, message):"
+            "响应含 lesson 则直接遵循;提示 should_write_lesson 则排查后用"
+            " memory_write(error_fingerprint=...) 沉淀教训 — 写清错误原因/"
+            "失败条件与适用边界/可保留做法,禁止把条件性失败记成绝对结论。"
             "同一对话保持相同 session_id。"
         ),
     )
@@ -245,6 +260,10 @@ def create_mcp_server(service: MemoryService) -> MCPServer:
         description="写入长期记忆: 沉淀事实/决策/结论。entities 为相关实体名,"
         "relations 为主谓宾三元组。任务完成或得到新结论时调用。"
         "scope=project 时需传 scope_id(项目名)或先调 memory_init_project。"
+        "带 error_fingerprint(memory_report_error 返回的指纹)时按教训协议:"
+        "内容加【教训】前缀、重要度提升至删除守卫保护线,写入后回链指纹 —"
+        "内容需含 错误原因/失败条件与适用边界/可保留做法,"
+        "禁止把条件性失败记成绝对结论。"
     )
     async def memory_write(
         content: str,
@@ -254,9 +273,12 @@ def create_mcp_server(service: MemoryService) -> MCPServer:
         entities: list[str] | None = None,
         relations: list[dict] | None = None,
         importance: float = 0.5,
+        error_fingerprint: str | None = None,
     ) -> str:
         """写入一条记忆,返回 memory_id 与涉及层(JSON)."""
         memory = await service.get()
+        if error_fingerprint:
+            content, importance = prepare_lesson_write(content, importance)
         resp = await memory.write(
             WriteRequest(
                 scope=_parse_scope(scope),
@@ -268,7 +290,40 @@ def create_mcp_server(service: MemoryService) -> MCPServer:
             session_id=session_id,
             scope_id=scope_id,
         )
+        if error_fingerprint and resp.memory_id:
+            # 教训必须持久: 短内容默认留 L0(会话内存),显式晋升 L1 落库
+            await memory.promote_memory(
+                resp.memory_id, session_id=session_id, scope_id=scope_id
+            )
+            await link_lesson(memory.engine.conn, error_fingerprint, resp.memory_id)
         return json.dumps(resp.to_dict(), ensure_ascii=False)
+
+    @server.tool(
+        description="错误指纹登记(出错/任务失败时调用): 同一错误归一到指纹"
+        "计数。响应含已有教训(lesson)则直接遵循;should_write_lesson=true 时"
+        "用 memory_write(error_fingerprint=指纹) 沉淀教训(三段式: 错误原因/"
+        "失败条件与适用边界/可保留做法,禁止把条件性失败记成绝对结论)。"
+    )
+    async def memory_report_error(
+        code: str,
+        message: str,
+        session_id: str = DEFAULT_SESSION_ID,
+        scope: str = "project",
+        scope_id: str | None = None,
+    ) -> str:
+        """登记错误指纹,返回计数/教训闭环状态(JSON)."""
+        memory = await service.get()
+        scope_str = resolve_scope_str(memory, scope, scope_id)
+        status = await register_error(
+            memory.engine.conn, scope_str=scope_str, code=code, message=message
+        )
+        lesson_content: str | None = None
+        if status["lesson_id"]:
+            lesson_content = await load_lesson_content(
+                memory.engine.conn, str(status["lesson_id"])
+            )
+        payload = build_advice(status, lesson_content)
+        return json.dumps(payload, ensure_ascii=False)
 
     @server.tool(
         description="新项目冷启动 + 扫描生成初始记忆: 传入 project_path 自动读 README、"

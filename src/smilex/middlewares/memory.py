@@ -185,9 +185,35 @@ class MemoryMiddleware(_WritePathMixin, _RecallPathMixin, _BootstrapFacadeMixin)
         """写入前 PII 脱敏器(审计层取脱敏后摘要用)."""
         return self._pii
 
+    @property
+    def current_scope_id(self) -> str | None:
+        """最近一次 initialize_project 的项目 ID(工具层 scope 缺省用)."""
+        return self._current_scope_id
+
     def _require_initialized(self) -> None:
         if not self._engine.is_initialized:
             raise RuntimeError("MemoryMiddleware 未初始化,请先调用 await initialize()")
+
+    async def promote_memory(
+        self,
+        memory_id: str,
+        *,
+        session_id: str,
+        scope_id: str | None = None,
+    ) -> None:
+        """把 L0 中的指定记忆立即晋升 L1(落库 + 向量;教训等高价值写入用).
+
+        正常写入按 promotion_threshold 自动晋升;短而重要的内容(如错误教训)
+        需要跨会话持久时显式调用 — 与 facts_bypass_l0 的直送路径同机制。
+        """
+        self._require_initialized()
+        await self._promotion.promote(
+            self._engine.conn,
+            session_id,
+            memory_id,
+            scope_id=scope_id or self._current_scope_id,
+        )
+        await self._engine.conn.commit()
 
     # ==================== M.6 历史归档(P2 收尾,§11.5/§11.6) ====================
 

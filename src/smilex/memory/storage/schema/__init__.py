@@ -12,7 +12,7 @@ import sqlite3
 from pathlib import Path
 
 # Schema 版本号(每次新增 .sql 文件或修改结构时 +1)
-SCHEMA_VERSION = 14
+SCHEMA_VERSION = 15
 
 # DDL 文件清单(按版本号顺序)
 MIGRATIONS: tuple[tuple[int, str], ...] = (
@@ -30,6 +30,7 @@ MIGRATIONS: tuple[tuple[int, str], ...] = (
     (12, "012_perf_indexes.sql"),
     (13, "013_fts5.sql"),
     (14, "014_access_stats.sql"),
+    (15, "015_error_fingerprints.sql"),
 )
 
 

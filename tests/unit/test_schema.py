@@ -371,3 +371,11 @@ def test_access_stat_columns(db_with_schema):
     columns = {row[1] for row in cur.fetchall()}
     assert "access_count" in columns
     assert "last_accessed_at" in columns
+
+
+def test_error_fingerprints_table(db_with_schema):
+    """015: 错误指纹表存在且列齐全(教训闭环)."""
+    cur = db_with_schema.execute("PRAGMA table_info(error_fingerprints)")
+    columns = {row[1] for row in cur.fetchall()}
+    assert {"fingerprint", "count", "first_seen", "last_seen",
+            "sample_code", "sample_message", "lesson_id"} <= columns

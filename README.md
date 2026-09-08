@@ -195,8 +195,14 @@ Web 面板(`http://127.0.0.1:8765/`)为只读,零依赖纯静态、可离线:
   `protect_importance`(默认 0.9)以上的高价值记忆豁免 forget/dedup 的一切
   删除(显式 `confirm_protected: true` 可越过)— 对齐 DSH
   "importance=3 需 confirm" 的删除守卫语义
-- 后续路线(参照 DSH 差距分析):lessonize 教训写入协议、错误指纹闭环、
-  WRITE_WRITE 之外冲突类型接入写入路径
+- **错误指纹 + 教训闭环**(主动优化收官): agent 出错时调
+  `memory_report_error(code, message)` — 同指纹第 2 次起响应提示沉淀教训
+  (三段式模板: 错误原因/失败条件与适用边界/可保留做法),已有教训则直接
+  回传内容;教训经 `memory_write(error_fingerprint=...)` 写入:【教训】前缀、
+  importance 0.95(删除守卫自动保护)、显式晋升 L1 跨会话持久、回链指纹
+  (重写指向最新)。同一错误重复犯 → 记忆库自我纠错
+- 后续路线(参照 DSH 差距分析):WRITE_WRITE 之外冲突类型接入写入路径、
+  面板指纹统计展示、指纹过期清理
 
 ### API Key 鉴权与库文件加密(§15.4)
 

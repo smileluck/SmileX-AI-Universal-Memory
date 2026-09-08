@@ -8,6 +8,23 @@
 
 ### Added
 
+- **错误指纹 + 教训闭环(§ 主动优化收官,DSH 自我纠错模式的确定性实现;
+  零 LLM 零轮询)**:
+  - schema 015 `error_fingerprints`: 指纹 = sha256(scope|code|规范化
+    message)[:16](scope 折进 — 同一错误在不同项目分别计数;数字/大小写/
+    空白归一剥离路径与时间戳随机性),count/first_seen/last_seen/lesson_id
+  - 新 MCP 工具 `memory_report_error(code, message)`: UPSERT 原子计数;
+    首次提示可沉淀,同指纹第 2 次起 `should_write_lesson=true` 并给三段式
+    教训模板(错误原因/失败条件与适用边界/可保留做法,禁止把条件性失败
+    记成绝对结论),已有教训则响应直接携带内容(agent 立即纠偏)
+  - `memory_write(error_fingerprint=...)` 教训写入(纯工具层,contracts 与
+    核心写路径零改动): 【教训】前缀 + importance 提升至 0.95(自动落入
+    删除守卫 ≥0.9 保护与访问续命,治理链闭环)+ 显式晋升 L1(新增
+    MemoryMiddleware.promote_memory 薄方法 — 短内容默认留 L0 会话内存,
+    教训必须跨会话持久)+ 回链指纹(同指纹重写指向最新,旧教训失链不删)
+  - MCP instructions 与 init 注入的 AGENTS.md 约定补错误循环协议
+    (已注入的旧文件不自动刷新,marker 幂等机制既有行为)
+
 - **superseded 显式化(§ 主动优化二期,消除 LWW 静默覆盖)**: 同键
   (scope+subject+predicate,当前有效)写不同值时,AUTO_LAST 放行不再产生
   "两行都当前有效"的静默矛盾 — 旧行闭合(valid_to = 新行 valid_from,
