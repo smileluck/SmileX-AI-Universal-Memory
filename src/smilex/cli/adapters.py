@@ -19,12 +19,15 @@ class ToolAdapter:
     - kind: "json"(默认,写入 servers_key 定位的表)/ "toml"(codex)/ "manual"(只打印指引)
     - servers_key: JSON 内 server 表的位置,支持嵌套元组(ZCode 为 ("mcp", "servers"))
     - user_config_path: 用户级(--scope user)配置绝对路径;None = 不支持用户级
+    - supports_http_headers: HTTP entry 是否可安全追加 "headers" 表
+      (§15.4 API Key 注入;格式不支持的适配器保持最小条目,由 init 打印手动指引)
     """
 
     name: str = ""
     config_rel_path: str = ""  # 相对项目根目录的配置文件路径
     servers_key: str | tuple[str, ...] = "mcpServers"
     kind: str = "json"
+    supports_http_headers: bool = False
 
     def config_path(self, project_dir: Path) -> Path:
         return project_dir / self.config_rel_path
@@ -48,11 +51,13 @@ class ToolAdapter:
 class KimiCodeAdapter(ToolAdapter):
     name = "kimi"
     config_rel_path = ".kimi-code/mcp.json"
+    supports_http_headers = True  # mcp.json 约定与 Claude/Cursor 同源,支持 headers
 
 
 class ClaudeCodeAdapter(ToolAdapter):
     name = "claude"
     config_rel_path = ".mcp.json"
+    supports_http_headers = True  # .mcp.json 官方支持 http 条目的 headers
 
     def user_config_path(self) -> Path | None:
         return Path.home() / ".claude.json"
@@ -62,6 +67,8 @@ class ClaudeCodeAdapter(ToolAdapter):
 
 
 class CodexAdapter(ToolAdapter):
+    # headers 键名随 codex 版本漂移且 serde 对未知字段严格,不自动注入
+    # (启用鉴权时 init 打印手动指引)
     name = "codex"
     config_rel_path = ".codex/config.toml"
     kind = "toml"
@@ -73,6 +80,7 @@ class CodexAdapter(ToolAdapter):
 class CursorAdapter(ToolAdapter):
     name = "cursor"
     config_rel_path = ".cursor/mcp.json"
+    supports_http_headers = True  # 官方文档支持远程 server 的 headers
 
     def user_config_path(self) -> Path | None:
         return Path.home() / ".cursor" / "mcp.json"

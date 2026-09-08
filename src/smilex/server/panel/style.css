@@ -519,3 +519,17 @@ pre {
     animation: none !important;
   }
 }
+
+/* API Key 输入(§15.4;无鉴权时留空即可,不影响任何功能) */
+.key-input {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  width: 110px;
+  transition: border-color 0.15s;
+}
+.key-input:focus { outline: none; border-color: var(--border-strong); }
+.key-input::placeholder { color: var(--faint); }

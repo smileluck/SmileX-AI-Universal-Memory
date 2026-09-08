@@ -53,8 +53,16 @@ function relTime(iso) {
 }
 
 async function getJSON(url, opts) {
-  const r = await fetch(url, opts);
-  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  // §15.4 API Key 鉴权: 已保存的 key 以 X-API-Key 附在所有请求上
+  const merged = Object.assign({ headers: {} }, opts || {});
+  const key = localStorage.getItem("smilex.apikey") || "";
+  if (key) merged.headers["X-API-Key"] = key;
+  const r = await fetch(url, merged);
+  if (!r.ok) {
+    const err = new Error(`HTTP ${r.status}`);
+    err.status = r.status;
+    throw err;
+  }
   return r.json();
 }
 
@@ -85,6 +93,13 @@ async function loadHealth() {
   const pill = $("#health-pill");
   try {
     const d = await getJSON("/api/health");
+    if (d.auth === "required") {
+      // 服务启用了 API Key 且当前 key 缺失/无效: health 只回裁剪载荷
+      pill.classList.add("bad");
+      pill.innerHTML = `<span class="dot"></span>未授权`;
+      pill.title = "服务已启用 API Key 鉴权,请在右上角输入框填入 key 后回车";
+      return;
+    }
     const c = d.config || {};
     pill.classList.remove("bad");
     pill.innerHTML = `<span class="dot"></span>运行中 · ${esc(fmtDur(d.uptime_s))}`;
@@ -95,8 +110,13 @@ async function loadHealth() {
       `调度器 ${c.enable_scheduler ? "开" : "关"} · token 预算 ${c.token_budget ?? "?"}`;
   } catch (e) {
     pill.classList.add("bad");
-    pill.innerHTML = `<span class="dot"></span>连接失败`;
-    pill.title = String(e);
+    if (e.status === 401) {
+      pill.innerHTML = `<span class="dot"></span>未授权`;
+      pill.title = "API Key 缺失或错误,请在右上角输入框填入后回车";
+    } else {
+      pill.innerHTML = `<span class="dot"></span>连接失败`;
+      pill.title = String(e);
+    }
   }
 }
 
@@ -375,6 +395,15 @@ function setAutoRefresh(on) {
 
 refreshBtn.addEventListener("click", () =>
   setAutoRefresh(refreshBtn.getAttribute("aria-pressed") !== "true"));
+
+/* ---------- API Key 输入(§15.4) ---------- */
+
+const apiKeyInput = $("#api-key-input");
+apiKeyInput.value = localStorage.getItem("smilex.apikey") || "";
+apiKeyInput.addEventListener("change", () => {
+  localStorage.setItem("smilex.apikey", apiKeyInput.value.trim());
+  loadHealth();  // 保存后立即用新 key 重试
+});
 
 /* ---------- 初始化 ---------- */
 

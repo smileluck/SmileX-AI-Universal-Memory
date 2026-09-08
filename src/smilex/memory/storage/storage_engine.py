@@ -98,8 +98,14 @@ class StorageEngine:
         *,
         pragmas: dict | None = None,
         load_vec: bool = True,
+        encryption_key: str | None = None,
     ) -> None:
-        self._engine = SQLiteEngine(db_path, pragmas=pragmas, load_vec=load_vec)
+        self._engine = SQLiteEngine(
+            db_path,
+            pragmas=pragmas,
+            load_vec=load_vec,
+            encryption_key=encryption_key,
+        )
         # predicate 字典编码进程内缓存(H1): 绑定本实例的 DB,见 predicate_codec
         self._predicate_cache: dict[str, int] = {}
 

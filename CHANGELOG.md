@@ -8,6 +8,39 @@
 
 ### Added
 
+- **HTTP API Key 鉴权(§15.4,默认关闭)**: `server/auth.py` 中间件挂主 app
+  最外层,单点覆盖 MCP / /api/* / /metrics;双方案取 key
+  (`Authorization: Bearer` 或 `X-API-Key`),`hmac.compare_digest` 恒时比较;
+  豁免面板静态资源与 `/api/health`(无 key 时 health 只返回 daemon 契约
+  字段 + `auth: "required"`,不暴露配置摘要)。配置 `api_key` 键,环境变量
+  `SMILEX_API_KEY` 优先(密钥不落盘首选);`doctor` 输出认证状态行
+- **工具配置 headers 自动注入**: `smilex-memory init` 在启用鉴权时为
+  kimi/claude/cursor 的 HTTP 条目自动追加 `"headers": {"X-API-Key": ...}`
+  (格式官方支持);codex/zcode/trae/workbuddy 保守不注入(键名漂移/严格
+  schema 静默丢条目),改打印手动指引
+- **面板鉴权支持**: 右上角 API Key 输入框(localStorage `smilex.apikey`),
+  单一 fetch 出口统一附 `X-API-Key`;401 时健康丸显示"未授权"引导输入
+- **SQLCipher 库文件加密(§15.4,实验性,默认关闭)**: `SQLiteEngine
+  (encryption_key=)` — `PRAGMA key` 为连接首条语句,随即校验
+  `PRAGMA cipher_version`,非 SQLCipher 构建立即报错中止(**绝不静默写
+  明文库**);`storage/sqlcipher.py` pysqlcipher3 shim(自动尝试);可选
+  extra `[encryption]`(需系统 libsqlcipher);配置 `db_encryption_key` 键,
+  环境变量 `SMILEX_DB_KEY` 优先;`build_middleware` 经既有 engine 注入口
+  组装(MemoryMiddleware 零改动)
+- ServerConfig 新增 2 键: `api_key` / `db_encryption_key`(example.yaml
+  以注释形态展示并加守卫测试,不引导密钥落盘)
+- pragma 字符串值改单引号包裹转义(`PRAGMA {key}='{value}'`,防运算符
+  配置中的引号/分号破坏语句 — 安全审计发现的唯一裸拼接点加固)
+
+### 安全核查结论(§15.4 收尾,写入 asbuilt 安全注记)
+
+- SQL 注入: 全库审计无用户可控字符串进入 SQL 文本(FTS MATCH 短语转义后
+  参数绑定、scope 全程 `?` 绑定、表名白名单/字面量)
+- 作用域隔离: `build_scope_clause` 全库强制参数化 scope 过滤,达标
+- 向量隔离: ChromaDB 路线已废弃(决策 D1),sqlite-vec 单库行级 scope
+  过滤天然隔离,原条目标注不适用
+
+
 - **可观测性四件套(§15.3,零新增核心依赖)**:
   - `GET /metrics` 指标端点(Prometheus 文本格式,`memory/observability/
     metrics.py` 手写 Counter/Gauge/Histogram 注册表,Gauge 支持回调惰性

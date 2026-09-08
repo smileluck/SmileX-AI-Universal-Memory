@@ -26,6 +26,15 @@ from .schema import (
 )
 
 
+def _quote_sql_literal(value: str) -> str:
+    """SQL 单引号字面量内容转义(' 加倍);调用方负责包裹外层引号.
+
+    PRAGMA 语句不支持 ``?`` 绑定,密钥等字符串只能以字面量进入语句,
+    转义防引号截断/拼接。
+    """
+    return value.replace("'", "''")
+
+
 def _setup_sqlite_vec(raw_conn: sqlite3.Connection) -> None:
     """同步函数: 在 sqlite3.Connection 上加载 sqlite-vec 扩展.
 
@@ -109,10 +118,14 @@ class SQLiteEngine:
         *,
         pragmas: dict[str, Any] | None = None,
         load_vec: bool = True,
+        encryption_key: str | None = None,
     ) -> None:
         self.db_path: str = str(db_path)
         self.pragmas: dict[str, Any] = {**self.DEFAULT_PRAGMAS, **(pragmas or {})}
         self.load_vec: bool = load_vec
+        # SQLCipher 密钥(§15.4,实验性): 必须是连接上的第一条语句,
+        # 且要求解释器的 sqlite3 为 SQLCipher 构建(见 storage/sqlcipher.py)
+        self.encryption_key: str | None = encryption_key
         self._conn: aiosqlite.Connection | None = None
 
     @property
@@ -134,12 +147,38 @@ class SQLiteEngine:
         if self._conn is not None:
             raise RuntimeError("SQLiteEngine 已初始化")
 
+        if self.encryption_key is not None and self.db_path == ":memory:":
+            raise ValueError("内存库不支持加密(加密仅对文件库有意义)")
+
         self._conn = await aiosqlite.connect(self.db_path)
         self._conn.row_factory = aiosqlite.Row
 
-        # 1. 应用 PRAGMAs
+        # 0. SQLCipher 密钥(必须是第一条语句,先于任何会读库头的 pragma;
+        #    随即校验 cipher_version — 香草 sqlite 会静默忽略 PRAGMA key,
+        #    不校验就会写出明文库,这是安全网)
+        if self.encryption_key is not None:
+            await self._conn.execute(
+                f"PRAGMA key = '{_quote_sql_literal(self.encryption_key)}'"
+            )
+            cursor = await self._conn.execute("PRAGMA cipher_version")
+            row = await cursor.fetchone()
+            version = str(row[0]).strip() if row is not None and row[0] else ""
+            if not version:
+                raise RuntimeError(
+                    "配置了 db_encryption_key,但当前解释器的 sqlite3 不是 "
+                    "SQLCipher 构建(PRAGMA key 被静默忽略,继续将写出明文库,已中止). "
+                    "解决: 安装 extra `pip install 'smilex-ai-memory[encryption]'` "
+                    "并确保系统有 libsqlcipher(brew install sqlcipher / "
+                    "apt install libsqlcipher-dev),详见 README「库文件加密」小节."
+                )
+
+        # 1. 应用 PRAGMAs(字符串值安全引用,防运算符配置里的引号/分号破坏语句)
         for key, value in self.pragmas.items():
-            await self._conn.execute(f"PRAGMA {key}={value}")
+            await self._conn.execute(
+                f"PRAGMA {key}="
+                + (f"'{_quote_sql_literal(value)}'" if isinstance(value, str)
+                   else str(value))
+            )
 
         # 2. 加载 sqlite-vec(必须在 worker 线程执行)
         if self.load_vec:

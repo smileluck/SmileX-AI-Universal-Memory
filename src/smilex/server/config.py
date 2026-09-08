@@ -32,8 +32,10 @@
 
 from __future__ import annotations
 
+import os
 import tomllib
 from pathlib import Path
+from typing import ClassVar
 
 from pydantic import BaseModel, Field
 
@@ -63,6 +65,23 @@ class ServerConfig(BaseModel):
     audit_reads: bool = False  # 审计 recall 读事件(量大,默认关)
     tracing: str = "noop"  # noop | otel(需 [tracing] extras)
     pii_masker: str = "noop"  # noop | regex(写入前 PII 脱敏)
+    # ---- 鉴权与加密(§15.4;默认全部关闭) ----
+    api_key: str | None = None  # HTTP API Key 鉴权(推荐用 SMILEX_API_KEY 环境变量)
+    db_encryption_key: str | None = None  # SQLCipher 密钥(推荐用 SMILEX_DB_KEY 环境变量)
+
+    # 环境变量优先于配置文件字段(密钥类配置首选放环境,不落盘)
+    ENV_API_KEY: ClassVar[str] = "SMILEX_API_KEY"
+    ENV_DB_KEY: ClassVar[str] = "SMILEX_DB_KEY"
+
+    @property
+    def effective_api_key(self) -> str | None:
+        """生效的 API Key: 环境变量 SMILEX_API_KEY > 配置文件 api_key."""
+        return os.environ.get(self.ENV_API_KEY) or self.api_key
+
+    @property
+    def effective_db_key(self) -> str | None:
+        """生效的库加密密钥: 环境变量 SMILEX_DB_KEY > 配置文件 db_encryption_key."""
+        return os.environ.get(self.ENV_DB_KEY) or self.db_encryption_key
 
     @property
     def mcp_url(self) -> str:

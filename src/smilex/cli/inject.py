@@ -95,6 +95,10 @@ def _inject_toml_config(config_path: Path, entry: dict) -> tuple[Path, str]:
     return config_path, action
 
 
+# HTTP headers 注入的 header 名(§15.4 API Key 鉴权;与服务端 auth.py 一致)
+API_KEY_HEADER = "X-API-Key"
+
+
 def inject_tool_config(
     adapter: ToolAdapter,
     project_dir: Path | None,
@@ -102,6 +106,7 @@ def inject_tool_config(
     url: str,
     stdio: bool = False,
     scope: str = "project",
+    api_key: str | None = None,
 ) -> tuple[Path, str]:
     """非破坏性合并写入工具的 MCP 配置,返回 (配置文件路径, 动作描述).
 
@@ -109,6 +114,8 @@ def inject_tool_config(
     - 文件不存在: 新建;已有其他 server: 合并保留
     - 同名 server 已存在且内容一致: 幂等跳过;不一致: 备份 .bak 后覆盖
     - TOML 适配器(codex)做文本级手术,其余内容 byte-for-byte 保留
+    - api_key 提供且适配器声明 supports_http_headers 时,HTTP entry 追加
+      headers 表(stdio 无需鉴权;不支持的适配器不注入,由调用方打印指引)
     """
     if scope == "user":
         config_path = adapter.user_config_path()
@@ -124,11 +131,12 @@ def inject_tool_config(
             raise ValueError("项目级注入需要提供项目目录")
         config_path = adapter.config_path(project_dir)
 
-    entry = (
-        adapter.stdio_entry(project_dir / ".smilex" / "memory.db")
-        if stdio
-        else adapter.http_entry(url)
-    )
+    if stdio:
+        entry = adapter.stdio_entry(project_dir / ".smilex" / "memory.db")
+    else:
+        entry = adapter.http_entry(url)
+        if api_key and adapter.supports_http_headers:
+            entry["headers"] = {API_KEY_HEADER: api_key}
     if adapter.kind == "toml":
         return _inject_toml_config(config_path, entry)
 

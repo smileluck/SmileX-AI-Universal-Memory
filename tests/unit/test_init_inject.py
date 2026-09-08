@@ -359,3 +359,53 @@ def test_trae_user_scope_probe(tmp_path, monkeypatch):
     user_dir = tmp_path / "Library" / "Application Support" / "Trae CN" / "User"
     user_dir.mkdir(parents=True)
     assert ADAPTERS["trae"].user_config_path() == user_dir / "mcp.json"
+
+
+# ---------- §15.4 API Key headers 注入 ----------
+
+def test_api_key_injected_for_supported_adapters(tmp_path):
+    """supports_http_headers=True 的适配器(kimi/claude/cursor)HTTP 条目带 headers."""
+    for name in ("kimi", "claude", "cursor"):
+        path, _ = inject_tool_config(
+            ADAPTERS[name], tmp_path, url="http://127.0.0.1:8765/mcp",
+            api_key="k1",
+        )
+        data = json.loads(path.read_text(encoding="utf-8"))
+        entry = data["mcpServers"][MCP_SERVER_NAME]
+        assert entry["headers"] == {"X-API-Key": "k1"}, name
+
+
+def test_api_key_not_injected_for_unsupported_adapters(tmp_path):
+    """codex/zcode/trae 格式不支持/不安全,条目保持最小(手动指引由 CLI 打印)."""
+    from smilex.cli.adapters import CodexAdapter, ZCodeAdapter
+
+    path, _ = inject_tool_config(
+        CodexAdapter(), tmp_path, url="http://127.0.0.1:8765/mcp", api_key="k1"
+    )
+    section = path.read_text(encoding="utf-8")
+    assert "X-API-Key" not in section and "k1" not in section
+
+    path, _ = inject_tool_config(
+        ZCodeAdapter(), tmp_path, url="http://127.0.0.1:8765/mcp", api_key="k1"
+    )
+    data = json.loads(path.read_text(encoding="utf-8"))
+    entry = data["mcp"]["servers"][MCP_SERVER_NAME]
+    assert "headers" not in entry
+
+
+def test_stdio_entry_never_gets_headers(tmp_path):
+    """stdio 模式无 HTTP 鉴权需求,不注入 headers."""
+    path, _ = inject_tool_config(
+        ADAPTERS["claude"], tmp_path, url="http://x/mcp", stdio=True, api_key="k1"
+    )
+    data = json.loads(path.read_text(encoding="utf-8"))
+    entry = data["mcpServers"][MCP_SERVER_NAME]
+    assert "headers" not in entry and entry["command"]
+
+
+def test_no_api_key_keeps_entry_minimal(tmp_path):
+    path, _ = inject_tool_config(
+        ADAPTERS["claude"], tmp_path, url="http://127.0.0.1:8765/mcp"
+    )
+    data = json.loads(path.read_text(encoding="utf-8"))
+    assert data["mcpServers"][MCP_SERVER_NAME] == {"url": "http://127.0.0.1:8765/mcp"}

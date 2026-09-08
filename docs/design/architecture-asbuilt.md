@@ -23,7 +23,8 @@
 9. [并发控制](#9-并发控制)
 10. [知识质量](#10-知识质量)
 11. [服务化层](#11-服务化层)
-12. [降级矩阵](#12-降级矩阵)
+12. [安全注记](#11a-安全注记15-4-落地状态)
+13. [降级矩阵](#12-降级矩阵)
 13. [性能注记](#13-性能注记)
 14. [扩展指南](#14-扩展指南)
 15. [关键设计决策速查](#15-关键设计决策速查)
@@ -404,6 +405,29 @@ token_budget=4000 / enable_scheduler=true`,CLI 可覆盖 db/host/port):
   时经 `bootstrap_project` 冷启动并扫描 README/git/markdown/源码生成
   初始记忆,stdio 模式写项目内库、HTTP 模式直写全局库) / `doctor`;
   三平台自启动注册脚本在 `scripts/register-service-*`
+
+## 11a. 安全注记(§15.4 落地状态)
+
+- **PII 脱敏**: `memory/pii.py`(默认 noop;见 §6 表格)— write() 入口对
+  content/实体名/三元组自由文本统一脱敏,幂等
+- **API Key 鉴权**: `server/auth.py` 中间件挂主 app 最外层(覆盖 MCP mount);
+  Bearer/X-API-Key 双方案,恒时比较;豁免静态资源与 /api/health(无 key
+  时 health 裁剪为契约字段);`SMILEX_API_KEY` 环境变量优先于配置文件
+- **文件加密(SQLCipher,实验性)**: `SQLiteEngine(encryption_key=)` 连接
+  首语句 `PRAGMA key` + `cipher_version` 校验(非加密构建即中止);
+  `storage/sqlcipher.py` pysqlcipher3 shim;`[encryption]` extra
+- **SQL 注入防护(2026-09 全量审计)**: 无用户可控字符串进入 SQL 文本 —
+  FTS MATCH 短语经 `_fts_phrase` 双引号转义后参数绑定;scope 值全程 `?`
+  绑定(`queries/_scope.build_scope_clause`);f-string SQL 的插值片段全部
+  是白名单表名(`temporal.py` 显式校验)/模块常量/`?` 占位列表;面板
+  `kind`/`limit` 等经 FastAPI 校验器约束。pragma 值已改单引号包裹转义
+- **作用域隔离**: 所有查询经 `build_scope_clause`/`_scope_clause` 强制带
+  scope 过滤,参数化;L0 会话按 session_id 隔离
+- **向量隔离**: 原设计"ChromaDB collection 按 scope 隔离"随 ChromaDB
+  废弃(决策 D1)不适用 — sqlite-vec 单库方案下向量行经 vector_links
+  关联业务行,检索路径全部带 scope 过滤,天然隔离
+- **JWT/OAuth**: 未实现(本地单用户场景 API Key 已覆盖;mcp SDK 的
+  TokenVerifier/AuthSettings 通道已预留,多租户需求出现时接入)
 
 ## 12. 降级矩阵
 

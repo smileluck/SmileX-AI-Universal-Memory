@@ -61,6 +61,11 @@ tracing = [
     "opentelemetry-api>=1.20",
     "opentelemetry-sdk>=1.20",
 ]
+# SQLCipher 库文件加密可选后端(§15.4,实验性);默认不加密。
+# 需系统 libsqlcipher: macOS `brew install sqlcipher` / Debian `apt install libsqlcipher-dev`
+encryption = [
+    "pysqlcipher3>=1.2.0",
+]
 # 服务化: MCP server + Web 面板(纯嵌入式库不需要)
 server = [
     "mcp>=1.9",

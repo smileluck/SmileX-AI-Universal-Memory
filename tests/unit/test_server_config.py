@@ -119,3 +119,45 @@ def test_repo_example_yaml_is_valid():
     assert config.audit_reads is False
     assert config.tracing == "noop"
     assert config.pii_masker == "noop"
+
+
+# ---------- §15.4 鉴权与加密配置 ----------
+
+def test_api_key_defaults_off():
+    config = ServerConfig()
+    assert config.api_key is None
+    assert config.db_encryption_key is None
+    assert config.effective_api_key is None
+    assert config.effective_db_key is None
+
+
+def test_effective_keys_env_priority(monkeypatch):
+    config = ServerConfig(api_key="from-file", db_encryption_key="db-file")
+    assert config.effective_api_key == "from-file"
+    monkeypatch.setenv("SMILEX_API_KEY", "from-env")
+    monkeypatch.setenv("SMILEX_DB_KEY", "db-env")
+    assert config.effective_api_key == "from-env"
+    assert config.effective_db_key == "db-env"
+
+
+def test_load_config_reads_auth_keys(tmp_path):
+    path = tmp_path / "auth.yaml"
+    path.write_text(
+        "api_key: file-key\ndb_encryption_key: db-key\n", encoding="utf-8"
+    )
+    config = load_config(path)
+    assert config.api_key == "file-key"
+    assert config.db_encryption_key == "db-key"
+
+
+def test_repo_example_auth_keys_commented():
+    """example.yaml 的密钥键保持注释形态(不引导用户把密钥写进文件)."""
+    example = Path(__file__).resolve().parents[2] / "config.example.yaml"
+    if not example.exists():
+        pytest.skip("config.example.yaml 不在仓库根")
+    text = example.read_text(encoding="utf-8")
+    assert "# api_key:" in text and "# db_encryption_key:" in text
+    for line in text.splitlines():
+        stripped = line.strip()
+        assert not stripped.startswith("api_key:"), "api_key 不应有生效值"
+        assert not stripped.startswith("db_encryption_key:")

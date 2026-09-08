@@ -32,6 +32,16 @@ if TYPE_CHECKING:
 
     from .mcp_server import MemoryService
 
+# Request 注解需模块级可见(FastAPI 经 get_type_hints 解析延迟注解);
+# 经 Any 变量中转避免"类名被二次赋值"的 mypy 冲突
+_Request: Any = Any
+try:
+    from fastapi import Request as _FastAPIRequest
+
+    _Request = _FastAPIRequest
+except ImportError:  # 核心(server extras 未装)场景: 仅影响注解,不触发导入
+    pass
+
 # §15.3 告警阈值(本地自包含告警;Prometheus 规则样例见 docs/observability-alerts.yaml)
 ALERT_QUEUE_DEPTH = 1000
 ALERT_DB_BYTES = 10 * 1024**3  # 10GB
@@ -158,7 +168,17 @@ def create_api_router(service: MemoryService) -> APIRouter:
     started_at = time.time()
 
     @router.get("/health")
-    async def health() -> dict[str, Any]:
+    async def health(request: _Request) -> dict[str, Any]:
+        # 鉴权豁免但条件裁剪: 未带有效 key 时只返回 daemon 契约字段,
+        # 配置摘要(db 路径等)不暴露(§15.4)
+        auth_required = service.config.effective_api_key is not None
+        if auth_required and not getattr(request.state, "auth_ok", False):
+            return {
+                "status": "ok",
+                "started_at": datetime.fromtimestamp(started_at, tz=UTC).isoformat(),
+                "uptime_s": round(time.time() - started_at, 1),
+                "auth": "required",
+            }
         c = service.config
         scheduler = service.scheduler
         report = get_integrity_report()

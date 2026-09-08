@@ -23,6 +23,7 @@ from ..memory.observability import (
     make_scheduler_observer,
 )
 from .api import create_api_router
+from .auth import install_auth_middleware
 from .config import ServerConfig
 from .mcp_server import MemoryService, _require_mcp, create_mcp_server
 
@@ -117,6 +118,9 @@ def create_app(config: ServerConfig) -> FastAPI:
     app.mount("/static", StaticFiles(directory=PANEL_DIR), name="static")
     # 兜底挂载 MCP 子应用(内部路由 /mcp);必须在 API/静态/metrics 路由之后
     app.mount("/", mcp_app)
+    # 鉴权中间件最后安装 = 包在最外层,先于指标计数执行(§15.4;
+    # 覆盖 /api/*、/metrics 与兜底 mount 的 MCP;未配置 key 时零安装)
+    install_auth_middleware(app, config)
     return app
 
 

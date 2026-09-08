@@ -27,6 +27,7 @@ from ..memory.models import MemoryScope, ScopeFilter
 from ..memory.observability import Telemetry
 from ..memory.pii import PIIConfig, get_pii_masker
 from ..memory.reranker import RerankerConfig, get_reranker
+from ..memory.storage.storage_engine import StorageEngine
 from ..middlewares._telemetry import TelemetryMemoryMiddleware
 from ..middlewares.dto import (
     RecallRequest,
@@ -122,6 +123,8 @@ def build_middleware(
 
     任一观测组件启用(audit/tracing)时返回 TelemetryMemoryMiddleware 包装
     (指标/审计/span);全 noop 时保持基类,行为与历史版本完全一致。
+    配置了 db_encryption_key 时自建加密 StorageEngine 经 engine= 注入
+    (含 pysqlcipher3 shim 尝试,见 storage/sqlcipher.py)。
     """
     embedder = get_embedder(EmbedderConfig(backend=config.embedder))
     reranker = get_reranker(RerankerConfig(backend=config.reranker))
@@ -136,12 +139,23 @@ def build_middleware(
             tracing=config.tracing,
             db_path=resolved_db,
         )
+    db_key = config.effective_db_key
+    engine: StorageEngine | None = None
+    if db_key is not None:
+        from ..memory.storage.sqlcipher import install_shim
+
+        # pysqlcipher3 在场则换掉 aiosqlite 的 sqlite3(须先于任何连接);
+        # 不在场时仍构造加密引擎 — SQLCipher 构建的解释器无需 shim,
+        # 香草解释器由 initialize() 的 cipher_version 校验兜底报错
+        install_shim()
+        engine = StorageEngine(resolved_db, encryption_key=db_key)
     middleware_cls: type[MemoryMiddleware] = (
         TelemetryMemoryMiddleware if telemetry.enabled else MemoryMiddleware
     )
     if middleware_cls is MemoryMiddleware:
         return MemoryMiddleware(
             resolved_db,
+            engine=engine,
             embedder=embedder,
             reranker=reranker,
             fact_extractor=extractor,
@@ -149,6 +163,7 @@ def build_middleware(
         )
     wrapped = TelemetryMemoryMiddleware(
         resolved_db,
+        engine=engine,
         embedder=embedder,
         reranker=reranker,
         fact_extractor=extractor,

@@ -75,13 +75,28 @@ audit_reads: false
 #          接 Jaeger/OTLP 见 README「可观测性与安全」小节)
 tracing: noop
 
-# ---------- 安全 ----------
+# ---------- 安全(§15.4;默认全部关闭) ----------
 
 # 写入前 PII 脱敏(仅 write() 路径;init 扫描导入不受影响):
 #   noop  直通(默认 — agent 记忆常需记住用户联系方式,默认不脱敏)
 #   regex 高置信度模式替换: email/手机号/身份证(校验位)/银行卡(Luhn)/
 #         IPv4/API key → [EMAIL] 类占位符;策略与自定义类别见 README
 pii_masker: noop
+
+# HTTP API Key 鉴权(推荐密钥放环境变量 SMILEX_API_KEY,不落配置文件):
+# 启用后所有请求(MCP / /api/* / /metrics)需带
+#   Authorization: Bearer <key> 或 X-API-Key: <key>
+# 豁免: 面板静态资源与 /api/health(未带 key 时 health 只返回运行状态,
+# 不暴露配置摘要);面板右上角输入框可填 key。
+# kimi/claude/cursor 的配置由 smilex-memory init 自动注入 headers;
+# codex/zcode/trae 格式不支持自动注入,init 会打印手动指引。
+# api_key: change-me-to-a-long-random-string
+
+# 库文件加密(SQLCipher,实验性;密钥推荐放环境变量 SMILEX_DB_KEY):
+# 需 pip install 'smilex-ai-memory[encryption]' + 系统 libsqlcipher
+# (macOS: brew install sqlcipher / Debian: apt install libsqlcipher-dev);
+# 非加密构建的解释器会在启动时明确报错,不会静默写明文库。详见 README。
+# db_encryption_key: another-long-random-string
 
 # ============================================================
 # fact_extractor: llm 时需要的环境变量(写在 shell / 服务环境,不放本文件):

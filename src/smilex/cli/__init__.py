@@ -191,8 +191,11 @@ def _cmd_init(args: argparse.Namespace) -> int:
 
     config = load_config(_config_path(args))
     url = args.url or config.mcp_url
+    api_key = config.effective_api_key
     tools = list(ADAPTERS) if "all" in args.tool else list(dict.fromkeys(args.tool))
     handled: list[str] = []
+    # §15.4 鉴权: 支持 headers 的适配器自动注入 X-API-Key,其余打印手动指引
+    needs_manual_key: list[str] = []
 
     for name in tools:
         adapter = ADAPTERS[name]
@@ -208,12 +211,19 @@ def _cmd_init(args: argparse.Namespace) -> int:
             continue
         try:
             path, action = inject_tool_config(
-                adapter, project_dir, url=url, stdio=args.stdio, scope=args.scope
+                adapter,
+                project_dir,
+                url=url,
+                stdio=args.stdio,
+                scope=args.scope,
+                api_key=api_key,
             )
         except ValueError as exc:
             print(f"[{name}] 跳过: {exc}", file=sys.stderr)
             continue
         print(f"[{name}] {action}: {path}")
+        if api_key and not args.stdio and not adapter.supports_http_headers:
+            needs_manual_key.append(name)
         handled.append(name)
 
     if args.guide:
@@ -230,6 +240,13 @@ def _cmd_init(args: argparse.Namespace) -> int:
 
     if args.scan:
         _run_scan(project_dir, stdio=args.stdio, config=config)
+
+    if api_key and needs_manual_key:
+        print(
+            f"\n服务已启用 API Key 鉴权: {'/'.join(needs_manual_key)} 的配置格式"
+            "不支持自动注入 headers,需手动给 MCP 条目加 "
+            f'{{"headers": {{"X-API-Key": "<你的 key>"}}}}(示例见 README)'
+        )
 
     if args.stdio:
         print(f"\n使用项目独立库: {project_dir / '.smilex' / 'memory.db'}(stdio 模式)")
@@ -262,6 +279,15 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
     else:
         print("server extras: 未安装 → pip install 'smilex-ai-memory[server]'")
         ok = False
+
+    if config.effective_api_key:
+        print("API Key 认证: 已启用(未带 X-API-Key / Bearer 的请求将被拒绝)")
+    else:
+        print("API Key 认证: 未配置(本地回环监听可接受;对外暴露请设置 SMILEX_API_KEY)")
+    if config.effective_db_key:
+        print("库文件加密: 已启用(SQLCipher;需加密构建的解释器,见 README)")
+    else:
+        print("库文件加密: 未启用")
 
     from ..server.daemon import http_health, is_alive, read_pid
 

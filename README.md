@@ -140,6 +140,8 @@ smilex-memory doctor
 | `audit_reads` | `false` | 是否审计 recall 读事件(量大,默认只记变更) |
 | `tracing` | `noop` | 分布式追踪:`noop` / `otel`([tracing] extras) |
 | `pii_masker` | `noop` | 写入前 PII 脱敏:`noop` 直通 / `regex` 高置信度正则替换 |
+| `api_key` | 空 | HTTP API Key 鉴权(推荐环境变量 `SMILEX_API_KEY`,见下) |
+| `db_encryption_key` | 空 | SQLCipher 库加密(推荐环境变量 `SMILEX_DB_KEY`,实验性) |
 
 `fact_extractor: llm` 需设置环境变量(放在 shell / 服务环境,不放配置文件):
 `SMILEX_EXTRACT_API_KEY`(必填,缺失时抽取静默降级)、
@@ -160,6 +162,47 @@ Web 面板(`http://127.0.0.1:8765/`)为只读,零依赖纯静态、可离线:
 另提供 `/api/health` 健康检查。写入统一走 MCP 工具
 (`memory_recall` / `memory_write` / `memory_init_project` / `memory_stats`)。
 详见 [Server 层设计](docs/design/modules/13-server-layer.md)。
+
+### API Key 鉴权与库文件加密(§15.4)
+
+**API Key 鉴权**(默认关闭;`0.0.0.0` 对外监听或远程 agent 接入时建议开启):
+
+```bash
+export SMILEX_API_KEY="$(openssl rand -hex 24)"   # 环境变量优先于配置文件 api_key
+smilex-memory start
+```
+
+- 生效后所有请求(MCP `/mcp`、`/api/*`、`/metrics`)需带
+  `Authorization: Bearer <key>` 或 `X-API-Key: <key>`(恒时比较,防时序侧信道)
+- 豁免: 面板静态资源与 `/api/health`(无 key 时 health 只返回运行状态与
+  `auth: "required"`,不暴露配置摘要;daemon 三契约字段不受影响)
+- 面板右上角有 API Key 输入框(存浏览器 localStorage,自动附在所有请求上)
+- 工具接入(headers 支持):**kimi / claude / cursor** 由
+  `smilex-memory init` 自动注入 `"headers": {"X-API-Key": ...}`;
+  **codex / zcode / trae / workbuddy** 配置格式不支持或不安全(键名随版本
+  漂移 / 严格 schema 会静默丢条目),init 会打印手动配置指引,
+  手动写法:`{"url": "...", "headers": {"X-API-Key": "<key>"}}`
+- stdio 模式(`smilex-memory mcp`)是本地管道,无需鉴权
+- `doctor` 输出认证状态行;JWT/OAuth 留待多租户需求(mcp SDK 的
+  TokenVerifier 通道已预留)
+
+**库文件加密**(SQLCipher,实验性,默认关闭):
+
+```bash
+brew install sqlcipher                    # 或 apt install libsqlcipher-dev
+pip install 'smilex-ai-memory[encryption]'
+export SMILEX_DB_KEY="强随机密钥"          # 环境变量优先于配置文件
+smilex-memory start
+```
+
+- 原理:`PRAGMA key` 必须是连接首条语句,随即校验 `PRAGMA cipher_version` —
+  **非 SQLCipher 构建会立刻报错中止,绝不静默写出明文库**
+- aiosqlite 绑定标准库 sqlite3,SQLCipher 需经 pysqlcipher3 shim
+  (自动尝试)或 sqlcipher 构建的解释器;见 `storage/sqlcipher.py` 注释
+- 注意:外部直连库文件的脚本(如 mem0_compat benchmark 的
+  `sqlite3.connect`)对加密库需同样应用 key;加密 + sqlite-vec 向量扩展
+  的组合取决于构建,启用前请小规模验证
+- 密钥丢失 = 数据不可恢复,请妥善保管(可用 `openssl rand -hex 32` 生成)
 
 ### 可观测性与安全
 

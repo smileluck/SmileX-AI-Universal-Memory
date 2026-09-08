@@ -2432,6 +2432,12 @@ crypto = [
 ]
 
 [[package]]
+name = "pysqlcipher3"
+version = "1.2.0"
+source = { registry = "https://mirrors.aliyun.com/pypi/simple" }
+sdist = { url = "https://mirrors.aliyun.com/pypi/packages/9d/eb/abc035ae8dda359dff865168dffe39d9a61f115cc6100f53276e6d4554c2/pysqlcipher3-1.2.0.tar.gz", hash = "sha256:3c8033812655947ebf29a809ac5106b2bc69be0274eaccef6b58f4580c8d06c5" }
+
+[[package]]
 name = "pytest"
 version = "9.1.1"
 source = { registry = "https://mirrors.aliyun.com/pypi/simple" }
@@ -3175,6 +3181,9 @@ dev = [
 embedding = [
     { name = "sentence-transformers" },
 ]
+encryption = [
+    { name = "pysqlcipher3" },
+]
 llm = [
     { name = "openai" },
 ]
@@ -3209,6 +3218,7 @@ requires-dist = [
     { name = "opentelemetry-sdk", marker = "extra == 'tracing'", specifier = ">=1.20" },
     { name = "pydantic", specifier = ">=2.9" },
     { name = "pydantic-settings", specifier = ">=2.5" },
+    { name = "pysqlcipher3", marker = "extra == 'encryption'", specifier = ">=1.2.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.3" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.24" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=5.0" },
@@ -3222,7 +3232,7 @@ requires-dist = [
     { name = "tiktoken", specifier = ">=0.8" },
     { name = "uvicorn", marker = "extra == 'server'", specifier = ">=0.32" },
 ]
-provides-extras = ["embedding", "rerank", "llm", "tracing", "server", "benchmark", "dev"]
+provides-extras = ["embedding", "rerank", "llm", "tracing", "encryption", "server", "benchmark", "dev"]
 
 [[package]]
 name = "sniffio"
