@@ -73,6 +73,9 @@ def create_app(config: ServerConfig) -> FastAPI:
                     summarizer=get_summarizer(
                         SummarizerConfig(backend=config.summarizer)
                     ),
+                    # semantic 任务 L3 社区缓存经此进 KNN 通道
+                    # (与写入路径共享 embedder/LRU)
+                    vector_store=memory.vector_store,
                 )
                 # 回填句柄供 /api/health 读队列深度;关停时清理
                 service.scheduler = scheduler

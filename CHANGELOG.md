@@ -8,6 +8,28 @@
 
 ### Added
 
+- **semantic 任务升级: Louvain 社区检测轻量版(08 号修订记录落地)**:
+  - 连通分量 → networkx 内置 `louvain_communities`(零新依赖)+ 固定
+    seed + 实体/边加载 ORDER BY(确定性前提 — SQLite 无 ORDER BY 行序
+    不保证,同数据不同运行可能产出不同社区);加权无向图(实体对间
+    三元组条数聚合为边权),加权模块度解决连通分量零分辨率下记忆图
+    连成巨分量的退化
+  - **分宇宙建图**(修复旧版 scope 污染): payload 不传 scope 时旧版把
+    全库所有 scope 混进同一张图、缓存全落 global;现按"global 单独 +
+    每个 project/tenant ∪ global"分别建图与缓存,对齐 recall 默认
+    "当前项目 + global"的检索视角;宇宙外实体端点的边不进图
+  - **diff 增量刷新**(替代整批删写): 社区 key = md5(成员 id 排序),
+    与库内 L3 缓存按 key diff — 只删消失的(先经 drop_fragment_vectors
+    清向量,FK 无 CASCADE)、只插新出现的、内容变化才 UPDATE;
+    数据未变重跑 = 零写入(旧行 id 与 updated_at 不变,真幂等)
+  - **社区向量重建**: CoreTaskRunner/register_core_tasks 新增
+    vector_store 注入(照 summarizer 先例;server 装配点传
+    middleware.vector_store — 新增同名只读属性),新社区/内容变更社区
+    即时重嵌,L3 进入 KNN 通道(此前仅 FTS BM25 可命中);LLM 摘要升级
+    有意不做 — 非确定性内容会破坏 diff 幂等并放大向量重建 churn
+  - 测试 +4: 零写入幂等 / diff 刷新(增删社区不动旧行)/ 分宇宙隔离 /
+    向量写入 + FK 安全;payload 新增 resolution/seed 可调参数
+
 - **设计文档治理批次(规划收口)**:
   - `10-personal-growth` v2 原地重写: 个人成长改用现有原语(skill:
     实体命名空间 + 双时态 skill_level 三元组 + 【学习】/【复盘】前缀

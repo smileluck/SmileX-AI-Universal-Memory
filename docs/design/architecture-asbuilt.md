@@ -316,7 +316,7 @@ cache 64MB / foreign\_keys / busy\_timeout 5000ms);迁移按
 - **graph**: `find_path` / `find_n_degree_relations` — 纯 SQL
   `WITH RECURSIVE` CTE BFS(`ORDER BY depth`,comma-path 环检测,M1
   优先队列)。**NetworkX 不承担存储**,只在调度器 semantic 任务里算
-  连通分量
+  Louvain 社区(2026-09 从连通分量升级)
 - **spatial**: R-tree bbox → Haversine 半径过滤;`query_in_location`
   层级路径
 - **causal**: `trace_causal_chain` 反向单 CTE(H4)/ 正向分批 `IN` 逐层
@@ -350,7 +350,7 @@ semantic 各一模块 + `_common.py` 共享子句,`__init__.py` 的 `CoreTaskRun
 | dedup       | 近重复合并(§ 主动优化): FTS trigram 短语找同 scope/layer 候选 + 字符 bigram Jaccard ≥ 0.7 确认;幸存者=较早 created\_at,吸收访问计数/时间区间/实体;重复行连同向量删除 | 每日 LOW,threshold=0.7,min\_length=12 |
 | summarize   | 规则式摘要(非 LLM),summary\_length 可调                                                                       | <br />                            |
 | causal      | 遍历 predecessor\_id 链维护 causal\_chains 表                                                               | <br />                            |
-| semantic    | NetworkX 构实体图,预计算连通分量("语义社区")缓存                                                                       | <br />                            |
+| semantic    | Louvain 社区检测(2026-09 从连通分量升级): 分宇宙建图(global 单独 + 每个 project/tenant ∪ global,对齐 recall 检索视角)+ 加权无向图(实体对间三元组条数为边权)+ 固定 seed/ORDER BY 确定性;L3 缓存 **diff 增量刷新**(key=md5(成员 id 排序),数据未变重跑零写入,消失社区先清向量再删行 FK 安全);注入 vector\_store 时社区缓存即时重嵌进 KNN 通道(此前仅 BM25 可命中) | 每 2h MEDIUM,min\_component=2,top\_k=5,resolution 可调 |
 
 `bootstrap/` 子包(冷启动):向导问答(`project_bootstrap` +
 `onboarding`,同名项目按 entity_id 复用既有 scope)、README 解析
@@ -532,7 +532,7 @@ token_budget=4000 / enable_scheduler=true`,CLI 可覆盖 db/host/port):
 | L0(工作记忆) | 进程内 cachebox LRU 缓存,按 session 隔离,驻留期不嵌入向量;类比"正在想的事" |
 | L1(短时记忆) | `temporal_fragments` 表 + 向量索引,可全文/语义检索;类比"最近几天的事" |
 | L2(长时记忆) | 知识图谱(entities/triples)+ 因果链,由 consolidate 任务从 L1 固化;类比"长期知识" |
-| L3(语义层) | 设计中的语义社区层;现状仅 semantic 任务用 NetworkX 预计算连通分量缓存,不在检索主路径 |
+| L3(语义层) | 语义社区层:semantic 任务用 NetworkX Louvain 预计算社区缓存(2026-09);注入 vector\_store 后进 KNN 通道,FTS BM25 始终可命中 |
 | FuzzyMemory | 核心记忆对象,全字段可选的"渐进式存储":时间可模糊、位置可只给层级,不要求一次填全 |
 | TimeRange | 模糊时间表达:exact(精确时刻)或 approx_start+approx_end(约略区间),二选一 |
 | FuzzyLocation | 模糊位置表达:精确坐标 / 层级路径 / 区域名 / location_id 四种形态任选 |
@@ -601,7 +601,7 @@ token_budget=4000 / enable_scheduler=true`,CLI 可覆盖 db/host/port):
 | consolidate | 核心任务:L1 碎片按 entity/scope 聚合固化成 L2 三元组 |
 | forget / 半衰期 | 核心任务:留存分 = importance × 0.5^(age/30 天) × 访问加成(≤3x),age 锚点含最近访问;低于 0.1 删除或降权 |
 | summarize | 核心任务:摘要压缩(默认规则式;summarizer=llm 注入 LLM 后端,见 §6) |
-| semantic | 核心任务:NetworkX 构实体图、预计算连通分量("语义社区")缓存 |
+| semantic | 核心任务:NetworkX Louvain 社区检测(分宇宙建图 + diff 增量刷新 + 社区向量重建) |
 | bootstrap / 冷启动 | 新项目初始化包:向导问答 + README 解析 + 模板 + 种子注入 + 批量导入;MCP `memory_init_project(project_path=...)` 与 CLI `init --scan` 一键完成"扫描并生成初始记忆"(README/git/markdown/源码),同名项目复用 scope 幂等可重跑 |
 | 扫描忽略规则 | markdown 与源码目录扫描跳过 node_modules/.venv/dist 等依赖与构建目录及隐藏目录,`max_files`(默认 500)截断防超大仓库 |
 | 源码导入 | 扫描通道之一:`.py` 用 AST 提取模块 docstring/顶层类与函数/内外部依赖(标准库过滤),其余代码扩展名读文件头注释兜底;文件/类/外部库分别落 `file:`/`class:`/`tech:` 实体,内部依赖解析为仓库相对路径 |

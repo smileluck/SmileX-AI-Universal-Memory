@@ -59,7 +59,8 @@ class CoreTaskRunner:
 
     每个方法签名符合 InterruptibleRun: `async (ctx, payload) -> dict(统计)`;
     实现委托至同名任务模块(consolidate/forget/summarize/causal/semantic/
-    db_integrity)。summarizer 可注入 LLM 后端(§5 演进路径,默认规则版)。
+    db_integrity)。summarizer 可注入 LLM 后端(§5 演进路径,默认规则版);
+    vector_store 注入后 semantic 任务的 L3 社区缓存即时重嵌向量。
     """
 
     def __init__(
@@ -67,9 +68,11 @@ class CoreTaskRunner:
         storage: StorageEngine,
         summarizer: Any = None,
         forget_defaults: dict[str, Any] | None = None,
+        vector_store: Any = None,
     ) -> None:
         self._storage = storage
         self._summarizer = summarizer
+        self._vector_store = vector_store
         # forget 任务的默认 payload(调度触发的运行 payload 为空,经此注入
         # CoreTaskConfig 的容量/守卫策略;手动 submit 的 payload 可覆盖)
         self._forget_defaults: dict[str, Any] = dict(forget_defaults or {})
@@ -89,7 +92,9 @@ class CoreTaskRunner:
         return await causal(self._storage, ctx, payload)
 
     async def semantic(self, ctx: InterruptContext, payload: dict[str, Any]) -> dict:
-        return await semantic(self._storage, ctx, payload)
+        return await semantic(
+            self._storage, ctx, payload, vector_store=self._vector_store
+        )
 
     async def db_integrity(self, ctx: InterruptContext, payload: dict[str, Any]) -> dict:
         return await db_integrity(self._storage, ctx, payload)
@@ -131,6 +136,7 @@ def register_core_tasks(
     *,
     config: CoreTaskConfig | None = None,
     summarizer: Any = None,
+    vector_store: Any = None,
 ) -> CoreTaskRunner:
     """把核心任务注册到调度器,并按 §8.1/§8.3 装配默认触发器.
 
@@ -143,6 +149,8 @@ def register_core_tasks(
     Args:
         summarizer: 摘要后端注入(None = RuleSummarizer;LLM 后端由
             server 层按 config.summarizer 构造,见 smilex.memory.summarizer)
+        vector_store: 向量存储注入(None = semantic 社区缓存不进 KNN 通道;
+            server 层传 middleware.vector_store,与写入路径共享 embedder)
 
     Returns:
         CoreTaskRunner(便于测试直接调用执行函数或自定义注册)
@@ -155,6 +163,7 @@ def register_core_tasks(
             "max_per_scope": config.forget_max_per_scope,
             "protect_importance": config.forget_protect_importance,
         },
+        vector_store=vector_store,
     )
 
     scheduler.register(
@@ -199,7 +208,10 @@ def register_core_tasks(
             run=runner.semantic,
             priority=TaskPriority.MEDIUM,
             interruptible=True,
-            description="语义图维护(NetworkX 连通分量 → L3 缓存)",
+            description=(
+                "语义图维护(Louvain 社区 → L3 缓存;分宇宙建图 + "
+                "diff 增量刷新 + 社区向量重建)"
+            ),
         )
     )
     scheduler.register(

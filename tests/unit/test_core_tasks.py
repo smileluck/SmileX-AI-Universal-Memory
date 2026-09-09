@@ -440,6 +440,181 @@ async def test_semantic_community_cache(engine, scheduler):
     assert await _count(conn, "layer = 'L3'") == 1
 
 
+async def _l3_snapshot(conn) -> dict[str, tuple[str, str]]:
+    """L3 社区缓存 → {fragment_id: (行 id, updated_at)}(幂等性比对用)."""
+    cur = await conn.execute(
+        "SELECT fragment_id, id, updated_at FROM temporal_fragments "
+        "WHERE layer = 'L3'"
+    )
+    return {
+        str(r["fragment_id"]): (str(r["id"]), str(r["updated_at"]))
+        for r in await cur.fetchall()
+    }
+
+
+async def test_semantic_zero_write_idempotency(engine, scheduler):
+    """确定性 + diff 刷新: 数据未变重跑 = 零写入(行 id 与 updated_at 不变)."""
+    conn = engine.conn
+    for eid, name in [("e1", "编译器"), ("e2", "链接器"), ("e3", "构建系统")]:
+        await _add_entity(conn, eid, name)
+    await _add_triple(conn, "r1", "e1", "依赖", object_id="e2")
+    await _add_triple(conn, "r2", "e2", "属于", object_id="e3")
+
+    task_id = await scheduler.submit("semantic")
+    await scheduler.wait_idle(timeout=3.0)
+    assert scheduler.get_status(task_id).status is TaskStatus.COMPLETED
+    before = await _l3_snapshot(conn)
+    assert len(before) == 1
+
+    await scheduler.submit("semantic")
+    await scheduler.wait_idle(timeout=3.0)
+    assert await _l3_snapshot(conn) == before  # 同 key 同行 id 同 updated_at
+
+
+async def test_semantic_diff_refresh(engine, scheduler):
+    """diff 增量刷新: 新增社区不动旧缓存行;社区消失时删除(不整批重写)."""
+    conn = engine.conn
+    for eid, name in [("a1", "网关"), ("a2", "路由"), ("b1", "缓存"), ("b2", "存储")]:
+        await _add_entity(conn, eid, name)
+    await _add_triple(conn, "ra1", "a1", "依赖", object_id="a2")
+
+    await scheduler.submit("semantic")
+    await scheduler.wait_idle(timeout=3.0)
+    before = await _l3_snapshot(conn)
+    assert len(before) == 1
+
+    # 新增第二个集群 → 旧社区行不动,新社区插入
+    await _add_triple(conn, "rb1", "b1", "依赖", object_id="b2")
+    await scheduler.submit("semantic")
+    await scheduler.wait_idle(timeout=3.0)
+    after = await _l3_snapshot(conn)
+    assert len(after) == 2
+    assert set(after) > set(before)
+    common_key = set(after) & set(before)
+    assert all(after[k] == before[k] for k in common_key)  # 旧行未重写
+
+    # 集群消失 → 对应缓存删除(先清向量,FK 安全),另一个保留
+    await conn.execute("DELETE FROM triples WHERE id = 'rb1'")
+    await conn.commit()
+    await scheduler.submit("semantic")
+    await scheduler.wait_idle(timeout=3.0)
+    final = await _l3_snapshot(conn)
+    assert set(final) == set(before)
+
+
+async def test_semantic_scope_universes(engine, scheduler):
+    """分宇宙建图: 项目社区落各自 scope,global 单独;跨项目实体不混图."""
+    conn = engine.conn
+    # proj_a 集群
+    for eid, name in [("a1", "网关"), ("a2", "路由"), ("a3", "鉴权")]:
+        await _add_entity(conn, eid, name)
+    await _add_triple(conn, "ra1", "a1", "依赖", object_id="a2")
+    await _add_triple(conn, "ra2", "a2", "依赖", object_id="a3")
+    # proj_b 集群 + global 链(经 global 三元组桥接,只应出现在 proj_b 宇宙)
+    for eid, name in [("b1", "缓存"), ("b2", "存储")]:
+        await _add_entity(conn, eid, name, scope="project:proj_b")
+    for eid, name in [("g1", "BGE"), ("g2", "嵌入")]:
+        await _add_entity(conn, eid, name, scope="global")
+    await _add_triple(conn, "rb1", "b1", "依赖", object_id="b2", scope="project:proj_b")
+    await _add_triple(conn, "rg1", "g1", "配合", object_id="g2", scope="global")
+    await _add_triple(conn, "rg2", "g2", "用于", object_id="b1", scope="global")
+
+    await scheduler.submit("semantic")
+    await scheduler.wait_idle(timeout=3.0)
+
+    cur = await conn.execute(
+        "SELECT scope, entities FROM temporal_fragments WHERE layer = 'L3'"
+    )
+    by_scope: dict[str, list[set[str]]] = {}
+    for r in await cur.fetchall():
+        by_scope.setdefault(str(r["scope"]), []).append(set(json.loads(r["entities"])))
+
+    # proj_a 宇宙只含 a* 实体(b*/g* 不在其图内)
+    assert by_scope.get(SCOPE) == [{"a1", "a2", "a3"}]
+    # proj_b 宇宙含 b* 与桥接进来的 g*(global 实体与 global 三元组端点在图内)
+    b_comms = by_scope.get("project:proj_b", [])
+    assert b_comms and any({"b1", "b2"} <= c for c in b_comms)
+    assert all(not ({"b1", "b2"} & c) for c in by_scope.get(SCOPE, []))
+    # global 宇宙只含 g* 实体
+    assert by_scope.get("global") and all(
+        c <= {"g1", "g2"} for c in by_scope["global"]
+    )
+
+
+@pytest.fixture
+async def vec_engine():
+    eng = StorageEngine(":memory:", load_vec=True)
+    await eng.initialize()
+    yield eng
+    await eng.close()
+
+
+async def test_semantic_vectors_and_fk_safety(vec_engine):
+    """注入 vector_store: 社区缓存进 KNN 通道;删除路径清向量不炸 FK;
+    数据未变重跑不重复建向量."""
+    from smilex.memory.storage.vector_store import VectorStore
+
+    conn = vec_engine.conn
+    vs = VectorStore()
+    sched = MemoryTaskScheduler(
+        vec_engine, SchedulerConfig(tick_interval=0.01, grace_timeout=0.5)
+    )
+    register_core_tasks(
+        sched,
+        vec_engine,
+        config=CoreTaskConfig(
+            enable_time_triggers=False,
+            enable_event_mappings=False,
+            enable_adaptive_rules=False,
+        ),
+        vector_store=vs,
+    )
+    await sched.start()
+    try:
+        for eid, name in [("e1", "编译器"), ("e2", "链接器"), ("e3", "构建系统")]:
+            await _add_entity(conn, eid, name)
+        await _add_triple(conn, "r1", "e1", "依赖", object_id="e2")
+        await _add_triple(conn, "r2", "e2", "属于", object_id="e3")
+
+        await sched.submit("semantic")
+        await sched.wait_idle(timeout=3.0)
+        snap = await _l3_snapshot(conn)
+        assert len(snap) == 1
+        frag_row_id = next(iter(snap.values()))[0]
+
+        # 社区缓存可被 KNN 命中(精确内容 → 最近邻)
+        cur = await conn.execute(
+            "SELECT content FROM temporal_fragments WHERE id = ?", [frag_row_id]
+        )
+        content = str((await cur.fetchone())["content"])
+        hits = await vs.knn_search(conn, content, k=5)
+        assert hits and hits[0].fragment_id == frag_row_id
+
+        # 重跑(无变化): 不新增向量(无重复行),缓存行不动
+        await sched.submit("semantic")
+        await sched.wait_idle(timeout=3.0)
+        assert await _l3_snapshot(conn) == snap
+        cur = await conn.execute(
+            "SELECT COUNT(*) AS c FROM vector_links WHERE fragment_id = ?",
+            [frag_row_id],
+        )
+        assert (await cur.fetchone())["c"] == 1
+
+        # 社区消失: 删缓存先清向量 — 不触发 FK,且向量行确实清掉
+        await conn.execute("DELETE FROM triples WHERE id IN ('r1', 'r2')")
+        await conn.commit()
+        await sched.submit("semantic")
+        await sched.wait_idle(timeout=3.0)
+        assert await _l3_snapshot(conn) == {}
+        cur = await conn.execute(
+            "SELECT COUNT(*) AS c FROM vector_links WHERE fragment_id = ?",
+            [frag_row_id],
+        )
+        assert (await cur.fetchone())["c"] == 0
+    finally:
+        await sched.stop()
+
+
 # ---------- 摘要任务: LLM 后端注入(P3 摘要压缩) ----------
 
 

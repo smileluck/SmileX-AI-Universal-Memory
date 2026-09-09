@@ -176,6 +176,11 @@ class MemoryMiddleware(_WritePathMixin, _RecallPathMixin, _BootstrapFacadeMixin)
         return self._l0
 
     @property
+    def vector_store(self) -> VectorStore:
+        """向量存储(与写入路径共享 embedder;调度器 semantic 任务注入用)."""
+        return self._vector_store
+
+    @property
     def concurrency(self) -> ConcurrencyController:
         """Layer 4 并发控制器(测试/诊断/任务链接入用)."""
         return self._concurrency
