@@ -289,3 +289,38 @@ async def test_numeric_tolerance_configurable(engine):
     report = await detector.scan("project:r6")
     # 130: 30/130 ≈ 23% > 20% → NUMERIC;115: 15/115 ≈ 13% ≤ 20% → 不报
     assert [c.subject_id for c in report.contradictions] == ["s1"]
+
+
+# ---------- 写入路径接线(2026-09): check_new 在 LWW 覆盖前留痕 ----------
+
+
+async def test_write_path_flags_numeric_contradiction(monkeypatch):
+    """middleware 写入同键数值超容差 → contradiction_detected warning(不阻断)."""
+    import smilex.middlewares._write_path as wp
+    from smilex.middlewares.dto import TripleInput, WriteRequest
+    from smilex.middlewares.memory import MemoryMiddleware
+
+    async with MemoryMiddleware() as mw:
+        events: list[tuple[str, dict]] = []
+        monkeypatch.setattr(
+            wp._logger, "warning",
+            lambda event, **kw: events.append((event, kw)),
+        )
+        for v in ("100", "130"):
+            resp = await mw.write(
+                WriteRequest(
+                    scope=MemoryScope.GLOBAL,
+                    content=f"服务错误率 {v}",
+                    relations=[
+                        TripleInput(
+                            subject_name="svc", predicate="error_rate",
+                            object_value=v,
+                        )
+                    ],
+                ),
+                session_id="s1",
+            )
+            assert resp.status.value == "saved"  # 检测只留痕不阻断
+        hits = [kw for ev, kw in events if ev == "contradiction_detected"]
+        assert hits and any("numeric" in kw["kinds"] for kw in hits)
+        assert hits[0]["predicate"] == "error_rate"

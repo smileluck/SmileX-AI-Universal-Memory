@@ -57,15 +57,31 @@ def create_app(config: ServerConfig) -> FastAPI:
                 from ..memory.summarizer import SummarizerConfig, get_summarizer
 
                 memory = await service.get()
+                # 维护引擎: 调度任务/checkpoint 与 HTTP 业务写分离 —
+                # CheckpointStore 的裸 commit 与业务多语句写在同一连接上
+                # 交错时会把半成品事务提前刷盘;独立引擎(WAL + busy_timeout
+                # 承载双连接写竞争)消除该窗口
+                from ..memory.storage.storage_engine import StorageEngine
+
+                db_key = config.effective_db_key
+                if db_key is not None:
+                    from ..memory.storage.sqlcipher import install_shim
+
+                    install_shim()  # 进程级幂等,见 build_middleware
+                maintenance_engine = StorageEngine(
+                    config.resolved_db_path(), encryption_key=db_key
+                )
+                await maintenance_engine.initialize()
+                stack.push_async_callback(maintenance_engine.close)
                 scheduler = MemoryTaskScheduler(
-                    memory.engine,
+                    maintenance_engine,
                     observer=make_scheduler_observer(service.telemetry),
                 )
                 from ..memory.scheduler.tasks import CoreTaskConfig
 
                 register_core_tasks(
                     scheduler,
-                    memory.engine,
+                    maintenance_engine,
                     config=CoreTaskConfig(
                         forget_max_per_scope=config.max_records_per_scope,
                         forget_protect_importance=config.protect_importance,
@@ -74,9 +90,27 @@ def create_app(config: ServerConfig) -> FastAPI:
                         SummarizerConfig(backend=config.summarizer)
                     ),
                     # semantic 任务 L3 社区缓存经此进 KNN 通道
-                    # (与写入路径共享 embedder/LRU)
+                    # (与写入路径共享 embedder/LRU;add_text 接收任务侧连接)
                     vector_store=memory.vector_store,
                 )
+                # Layer 5 质量任务默认接线(此前无宿主注册,生产部署下
+                # 归档保留策略与跨项目提升永不发生):
+                # - archiver: 历史 365 天/片段 180 天冷数据归档(每日)
+                # - scope_promoter: 跨项目共现自动提升到 global(每日)
+                from ..memory.quality.archiver import register_archive_task
+                from ..memory.quality.scope_promoter import (
+                    register_scope_promotion_task,
+                )
+
+                register_archive_task(
+                    scheduler, maintenance_engine, interval_seconds=86400
+                )
+                register_scope_promotion_task(
+                    scheduler, maintenance_engine, interval_seconds=86400
+                )
+                # 事件接线: middleware 的 session_end/memory_full 经调度器
+                # 映射触发 forget/consolidate(事件触发从死配置变为活链路)
+                memory.event_sink = scheduler.emit
                 # 回填句柄供 /api/health 读队列深度;关停时清理
                 service.scheduler = scheduler
                 await scheduler.start()
@@ -89,6 +123,7 @@ def create_app(config: ServerConfig) -> FastAPI:
             yield
 
     app = FastAPI(title="SmileX Memory Server", lifespan=lifespan)
+    app.state.service = service  # 测试/诊断可达(调度器句柄经 lifespan 回填)
     app.include_router(create_api_router(service))
 
     if config.metrics:

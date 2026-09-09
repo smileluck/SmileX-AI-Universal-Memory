@@ -18,6 +18,8 @@ import re
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
+from .observability import get_logger
+
 EXTRACTOR_BACKENDS = ("passthrough", "llm")
 DEFAULT_EXTRACT_MODEL = "glm-4.5-flash"
 
@@ -35,6 +37,9 @@ possessions, preferences, habits, plans, and updates that supersede earlier fact
 5. Do NOT summarize or merge multiple facts into one line; do NOT add facts \
 not present in the text.
 6. Output ONLY a JSON array of strings, one fact per element. No other text."""
+
+
+_logger = get_logger("extractor")
 
 
 @runtime_checkable
@@ -80,6 +85,11 @@ class LLMFactExtractor:
             "SMILEX_EXTRACT_MODEL", DEFAULT_EXTRACT_MODEL
         )
         self._api_key = api_key or os.environ.get("SMILEX_EXTRACT_API_KEY")
+        if not self._api_key:
+            _logger.warning(
+                "llm_extractor_no_key",
+                hint="SMILEX_EXTRACT_API_KEY 未配置,抽取降级为原文直通",
+            )
         self._base_url = base_url or os.environ.get("SMILEX_EXTRACT_BASE_URL")
         self._max_tokens = max_tokens
         self._client = None  # 懒加载
@@ -108,6 +118,7 @@ class LLMFactExtractor:
         """LLM 抽取原子事实;任何失败(未配置/网络/解析)降级返回 [content]."""
         client = self._load_client()
         if client is None:
+            # 未配 key: 构造时已 warn 过,这里保持静默零开销降级
             return [content]
         try:
             resp = await client.chat.completions.create(
@@ -122,7 +133,10 @@ class LLMFactExtractor:
             text = (resp.choices[0].message.content or "").strip()
             facts = self._parse_facts(text)
             return facts or [content]
-        except Exception:
+        except Exception as exc:  # noqa: BLE001 — 降级不阻断写入,但必须可观测
+            _logger.warning(
+                "llm_extract_degraded", error=str(exc)[:200], fallback="content"
+            )
             return [content]
 
     @staticmethod

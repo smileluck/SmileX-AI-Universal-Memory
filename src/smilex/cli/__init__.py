@@ -10,6 +10,8 @@
            WorkBuddy 输出手动接入指引);支持 --scope project|user;
            --scan 时冷启动并扫描项目(README/git 历史/markdown/源码结构)生成初始记忆
 - doctor:  环境自检(配置 / db / 端口 / 服务可达性)
+- maintain: 一次性维护任务(stdio 项目独立库不享受后台调度,手动/脚本触发;
+           默认 forget+dedup+consolidate+semantic,--tasks 可选子集)
 
 通用旗标: --config 指定配置文件路径(.toml/.yaml 均可,默认 ~/.smilex/config.toml),
 --host/--port 覆盖监听地址(CLI > 配置文件 > 默认 127.0.0.1:8765)。
@@ -304,6 +306,79 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
     return 0 if ok else 1
 
 
+_MAINTAIN_TASKS = ("consolidate", "forget", "dedup", "semantic", "summarize")
+
+
+def _cmd_maintain(args: argparse.Namespace) -> int:
+    """一次性维护(2026-09): 调度任务的手动/脚本入口.
+
+    stdio 模式每工具进程短生命周期、不启动调度器 — 项目独立库的
+    forget/dedup/consolidate/semantic 由此命令承接(可挂 cron/钩子)。
+    """
+    config = load_config(_config_path(args))
+    db_path = Path(args.db).expanduser() if args.db else config.resolved_db_path()
+    if not db_path.exists():
+        print(f"错误: 数据库不存在: {db_path}", file=sys.stderr)
+        return 1
+    tasks = [t.strip() for t in args.tasks.split(",") if t.strip()]
+    unknown = [t for t in tasks if t not in _MAINTAIN_TASKS]
+    if unknown or not tasks:
+        print(
+            f"错误: 任务需为 {', '.join(_MAINTAIN_TASKS)} 的非空子集",
+            file=sys.stderr,
+        )
+        return 1
+
+    async def _run() -> int:
+        from ..memory.scheduler.scheduler import (
+            MemoryTaskScheduler,
+            SchedulerConfig,
+        )
+        from ..memory.scheduler.tasks import CoreTaskConfig, register_core_tasks
+        from ..memory.summarizer import SummarizerConfig, get_summarizer
+        from ..server.mcp_server import build_middleware
+
+        mw = build_middleware(config, db_path=db_path)
+        await mw.initialize()
+        try:
+            sched = MemoryTaskScheduler(
+                mw.engine, SchedulerConfig(tick_interval=0.05, grace_timeout=30.0)
+            )
+            register_core_tasks(
+                sched,
+                mw.engine,
+                config=CoreTaskConfig(
+                    enable_time_triggers=False,
+                    enable_event_mappings=False,
+                    enable_adaptive_rules=False,
+                    forget_max_per_scope=config.max_records_per_scope,
+                    forget_protect_importance=config.protect_importance,
+                ),
+                summarizer=get_summarizer(
+                    SummarizerConfig(backend=config.summarizer)
+                ),
+                vector_store=mw.vector_store,
+            )
+            await sched.start()
+            try:
+                task_ids = [await sched.submit(name) for name in tasks]
+                await sched.wait_idle(timeout=600.0)
+            finally:
+                await sched.stop()
+            ok = True
+            for name, tid in zip(tasks, task_ids, strict=True):
+                info = sched.get_status(tid)
+                status = info.status.value if info else "unknown"
+                error = f" — {info.error}" if info and info.error else ""
+                print(f"[{name}] {status}{error}")
+                ok = ok and info is not None and info.status.value == "completed"
+            return 0 if ok else 1
+        finally:
+            await mw.close()
+
+    return asyncio.run(_run())
+
+
 # ==================== 入口 ====================
 
 
@@ -400,6 +475,18 @@ def build_parser() -> argparse.ArgumentParser:
     p_doctor = sub.add_parser("doctor", help="环境自检")
     _add_config(p_doctor)
     p_doctor.set_defaults(func=_cmd_doctor)
+
+    p_maint = sub.add_parser(
+        "maintain", help="一次性维护任务(默认 forget+dedup+consolidate+semantic)"
+    )
+    _add_config(p_maint)
+    p_maint.add_argument(
+        "--tasks",
+        default="forget,dedup,consolidate,semantic",
+        help=f"逗号分隔任务子集(可选: {', '.join(_MAINTAIN_TASKS)})",
+    )
+    p_maint.add_argument("--db", help="目标库路径(默认取配置 db_path)")
+    p_maint.set_defaults(func=_cmd_maintain)
 
     return parser
 

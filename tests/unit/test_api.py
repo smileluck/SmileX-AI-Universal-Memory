@@ -146,3 +146,19 @@ def test_memories_kind_filter(client, tmp_path):
     assert rows == []
     rows = client.get("/api/memories", params={"kind": "fragment"}).json()
     assert [r["id"] for r in rows] == ["kf1"]
+
+
+def test_app_lifespan_registers_quality_tasks(tmp_path):
+    """lifespan 装配: 核心任务 + archiver + scope_promotion 默认注册(2026-09 接线)."""
+    config = ServerConfig(db_path=tmp_path / "sched.db", enable_scheduler=True)
+    app = create_app(config)
+    with TestClient(app) as client:
+        assert client.get("/api/health").status_code == 200
+        scheduler = app.state.service.scheduler
+        assert scheduler is not None
+        from smilex.memory.scheduler import CORE_TASK_NAMES
+
+        for name in CORE_TASK_NAMES:
+            assert scheduler.has_task(name), name
+        assert scheduler.has_task("archive")  # Layer 5 归档(每日)
+        assert scheduler.has_task("scope_promotion")  # 跨项目提升(每日)

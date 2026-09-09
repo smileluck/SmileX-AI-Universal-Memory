@@ -252,6 +252,22 @@ class _WritePathMixin:
                     and guard.conflict.conflicting_memory_id
                 ):
                     predecessor_id = guard.conflict.conflicting_memory_id
+            # 矛盾检测(§11.2 写入时同步检测,2026-09 接线): LWW 只会静默
+            # 覆盖同键旧行,四维检测(VALUE/NUMERIC/TEMPORAL/CAUSAL)在覆盖
+            # 前留痕 — 数量超容差/时态重叠/反向因果这类"新值在否定旧值"
+            # 的事件值得被看见;只告警不阻断(解决仍走 Layer 4 策略)
+            if detect and (rel.object_value or rel.object_id):
+                found = await self._detect_contradictions(
+                    scope_str, subject_id, rel
+                )
+                if found:
+                    _logger.warning(
+                        "contradiction_detected",
+                        scope=scope_str,
+                        subject_id=subject_id,
+                        predicate=rel.predicate,
+                        kinds=[str(c.kind) for c in found],
+                    )
             new_triple = Triple(
                 triple_id=(
                     f"{subject_id}|{rel.predicate}|"
@@ -280,6 +296,32 @@ class _WritePathMixin:
         # 单事务批量写入(H1): N 条 triple 只刷一次 WAL
         await self._engine.write_triples(triples, scope_id=scope_id)
         return [t.id for t in triples]
+
+    async def _detect_contradictions(self, scope_str: str, subject_id: str, rel) -> list:
+        """写入时矛盾检测(§11.2 同步轻量版),返回矛盾列表(可空).
+
+        检测器懒构造并缓存在实例上;检测自身失败只降级不阻断写入
+        (告警链路不能比写入更脆)。
+        """
+        detector = getattr(self, "_contradiction_detector", None)
+        if detector is None:
+            from ..memory.quality.contradiction import (  # 延迟导入: 按需
+                ContradictionDetector,
+            )
+
+            detector = ContradictionDetector(self._engine)
+            self._contradiction_detector = detector
+        try:
+            return await detector.check_new(
+                scope=scope_str,
+                subject_id=subject_id,
+                predicate=rel.predicate,
+                object_id=rel.object_id,
+                object_value=rel.object_value,
+            )
+        except Exception as exc:  # noqa: BLE001 — 检测失败不阻断写入
+            _logger.warning("contradiction_check_failed", error=str(exc)[:200])
+            return []
 
     async def _resolve_entity_names(
         self,

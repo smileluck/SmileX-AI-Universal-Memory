@@ -213,3 +213,27 @@ async def test_promotion_time_start_approx_start_used():
         assert row["time_start"].startswith("2024-01-15")
     finally:
         await mw.close()
+
+
+async def test_llm_extractor_logs_degradation(monkeypatch):
+    """LLM 调用失败降级返回原文时必须留 warning(此前完全静默)."""
+    import smilex.memory.extractor as ext_mod
+
+    ext = LLMFactExtractor(api_key="test-key")
+
+    class _FailingCompletions:
+        async def create(self, **kw):
+            raise RuntimeError("网络不可达")
+
+    class _FailingClient:
+        chat = type("Chat", (), {"completions": _FailingCompletions()})()
+
+    ext._client = _FailingClient
+
+    events: list[str] = []
+    monkeypatch.setattr(
+        ext_mod._logger, "warning",
+        lambda event, **kw: events.append(event),
+    )
+    assert await ext.extract("chunk") == ["chunk"]
+    assert "llm_extract_degraded" in events
