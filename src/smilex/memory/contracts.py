@@ -129,6 +129,7 @@ class WriteRequest:
     location: FuzzyLocation | None = None
     certainty: CertaintyLevel = CertaintyLevel.MEDIUM
     importance: float = 0.5
+    expires_at: datetime | None = None  # TTL: 晋升时写 time_end,forget 到期淘汰
 
     def __post_init__(self) -> None:
         if not self.content:
@@ -146,6 +147,7 @@ class WriteRequest:
             "location": self.location.to_dict() if self.location else None,
             "certainty": str(self.certainty),
             "importance": self.importance,
+            "expires_at": to_iso(self.expires_at) if self.expires_at else None,
         }
 
     @classmethod
@@ -159,6 +161,7 @@ class WriteRequest:
             location=FuzzyLocation.from_dict(d["location"]) if d.get("location") else None,
             certainty=CertaintyLevel(d.get("certainty", "medium")),
             importance=float(d.get("importance", 0.5)),
+            expires_at=from_iso(d["expires_at"]) if d.get("expires_at") else None,
         )
 
 

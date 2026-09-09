@@ -385,9 +385,15 @@ def create_mcp_server(service: MemoryService) -> MCPServer:
         relations: list[dict] | None = None,
         importance: float = 0.5,
         error_fingerprint: str | None = None,
+        expires_at: str | None = None,
     ) -> str:
-        """写入一条记忆,返回 memory_id 与涉及层(JSON)."""
+        """写入一条记忆,返回 memory_id 与涉及层(JSON).
+
+        expires_at 为 ISO 时间(TTL): 晋升时写入 time_end,过期后 forget 淘汰
+        — 适合临时性事实(活动期/折扣码/占位决策)。
+        """
         memory = await service.get()
+        expires_dt = from_iso(expires_at) if expires_at else None
         if error_fingerprint:
             content, importance = prepare_lesson_write(content, importance)
         resp = await memory.write(
@@ -397,6 +403,7 @@ def create_mcp_server(service: MemoryService) -> MCPServer:
                 entities=list(entities or []),
                 relations=[TripleInput(**r) for r in (relations or [])],
                 importance=importance,
+                expires_at=expires_dt,
             ),
             session_id=session_id,
             scope_id=scope_id,

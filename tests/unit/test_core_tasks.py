@@ -698,3 +698,120 @@ def _bare_ctx(engine):
     from smilex.memory.scheduler.checkpoint import CheckpointStore, InterruptContext
 
     return InterruptContext("task-direct", CheckpointStore(engine))
+
+
+# ---------- 生命周期语义修正(2026-09 Phase 3) ----------
+
+
+async def test_consolidation_inherits_decay_anchor(engine, scheduler):
+    """聚合行衰减锚点继承: updated_at 取成员最大值(不再重置为 now),
+    access_count 取成员和 — 消除"整合=变相永久续命"."""
+    conn = engine.conn
+    old_ts = "2025-01-01T00:00:00.000000Z"
+    new_ts = "2026-06-01T00:00:00.000000Z"
+    # 三条同实体 L1,锚点/热度各不同(updated_at 通过 _add_fragment 的
+    # updated_at 参数控制;access_count 直接 UPDATE)
+    await _add_fragment(conn, "a-01", "偏好一", entities=("e1",), updated_at=old_ts)
+    await _add_fragment(conn, "a-02", "偏好二", entities=("e1",), updated_at=new_ts)
+    await _add_fragment(conn, "a-03", "偏好三", entities=("e1",), updated_at=old_ts)
+    await conn.execute(
+        "UPDATE temporal_fragments SET access_count = 5 WHERE id = 'a-01'"
+    )
+    await conn.execute(
+        "UPDATE temporal_fragments SET access_count = 2 WHERE id = 'a-02'"
+    )
+    await conn.commit()
+
+    await scheduler.submit("consolidate")
+    await scheduler.wait_idle(timeout=3.0)
+
+    cur = await conn.execute("SELECT * FROM temporal_fragments WHERE layer = 'L2'")
+    row = await cur.fetchone()
+    assert row is not None
+    assert row["updated_at"] == new_ts  # 成员最大锚点,不是 now
+    assert row["access_count"] == 7  # 成员热度求和
+
+
+async def test_forget_expires_error_fingerprints(engine, scheduler):
+    """无教训关联且 last_seen 超过 ttl 的指纹清理;有教训的保留."""
+    conn = engine.conn
+    old = "2025-01-01T00:00:00.000000Z"
+    fresh = "2099-01-01T00:00:00.000000Z"
+    for fp, last, lesson in [
+        ("noise-old", old, None),
+        ("keep-fresh", fresh, None),
+        ("keep-lesson", old, "some-lesson-id"),
+    ]:
+        await conn.execute(
+            "INSERT INTO error_fingerprints(fingerprint, count, first_seen, "
+            "last_seen, sample_code, sample_message, lesson_id) "
+            "VALUES (?, 1, ?, ?, 'E', 'm', ?)",
+            (fp, last, last, lesson),
+        )
+    await conn.commit()
+
+    task_id = await scheduler.submit("forget", payload={"fingerprint_ttl_days": 90})
+    await scheduler.wait_idle(timeout=3.0)
+    assert scheduler.get_status(task_id).status is TaskStatus.COMPLETED
+
+    cur = await conn.execute("SELECT fingerprint FROM error_fingerprints")
+    remaining = {r["fingerprint"] for r in await cur.fetchall()}
+    assert remaining == {"keep-fresh", "keep-lesson"}
+
+
+async def test_ttl_end_to_end():
+    """expires_at 链路: write 带 TTL → close_session 晋升写 time_end → forget 到期淘汰."""
+    from datetime import UTC, datetime
+
+    from smilex.memory.models import MemoryScope
+    from smilex.memory.scheduler.scheduler import (
+        MemoryTaskScheduler,
+        SchedulerConfig,
+    )
+    from smilex.middlewares.dto import WriteRequest
+    from smilex.middlewares.memory import MemoryMiddleware
+
+    async with MemoryMiddleware() as mw:
+        expired = datetime(2025, 1, 1, tzinfo=UTC)
+        await mw.write(
+            WriteRequest(
+                scope=MemoryScope.GLOBAL,
+                content="限时活动: 年底截止的折扣码",
+                expires_at=expired,
+            ),
+            session_id="ttl",
+        )
+        assert await mw.close_session("ttl") == 1  # flush → L1
+
+        conn = mw.engine.conn
+        cur = await conn.execute(
+            "SELECT time_end FROM temporal_fragments WHERE layer = 'L1'"
+        )
+        row = await cur.fetchone()
+        assert row is not None and row["time_end"] is not None
+        assert str(row["time_end"]).startswith("2025-01-01")
+
+        sched = MemoryTaskScheduler(
+            mw.engine, SchedulerConfig(tick_interval=0.01, grace_timeout=1.0)
+        )
+        register_core_tasks(
+            sched,
+            mw.engine,
+            config=CoreTaskConfig(
+                enable_time_triggers=False,
+                enable_event_mappings=False,
+                enable_adaptive_rules=False,
+            ),
+        )
+        await sched.start()
+        try:
+            task_id = await sched.submit("forget")
+            await sched.wait_idle(timeout=3.0)
+            assert sched.get_status(task_id).status is TaskStatus.COMPLETED
+        finally:
+            await sched.stop()
+
+        cur = await conn.execute(
+            "SELECT COUNT(*) AS c FROM temporal_fragments WHERE layer = 'L1'"
+        )
+        assert (await cur.fetchone())["c"] == 0  # time_end 已过 → 直接淘汰

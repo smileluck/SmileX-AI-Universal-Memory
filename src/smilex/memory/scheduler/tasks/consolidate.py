@@ -172,11 +172,17 @@ async def _flush_consolidation_group(
     ids: list[str] = g["ids"]
     placeholders = ",".join("?" for _ in ids)
     cur = await conn.execute(
-        f"SELECT content FROM temporal_fragments WHERE id IN ({placeholders}) "
-        "ORDER BY id",
+        f"SELECT content, updated_at, access_count FROM temporal_fragments "
+        f"WHERE id IN ({placeholders}) ORDER BY id",
         ids,
     )
-    contents = [r["content"] for r in await cur.fetchall()]
+    rows = await cur.fetchall()
+    contents = [r["content"] for r in rows]
+    # 衰减锚点继承(2026-09): 聚合行 updated_at 取成员最大值而非 now,
+    # access_count 取成员和 — 否则整合=变相永久续命(age 重置为 0 且热度清零,
+    # forget 的留存分公式永远打高分),与 dedup 不扰锚点的语义也不一致
+    updated_at = max((str(r["updated_at"]) for r in rows), default=None)
+    access_count = sum(int(r["access_count"] or 0) for r in rows)
 
     entities = sorted(g["entities"])
     relations = sorted(g["relations"])
@@ -192,7 +198,8 @@ async def _flush_consolidation_group(
     await conn.execute(
         "INSERT INTO temporal_fragments(id, fragment_id, time_start, time_end, "
         "content, entities, relations, scope, layer, importance, "
-        "created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "access_count, created_at, updated_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             new_id,
             new_id,
@@ -204,8 +211,9 @@ async def _flush_consolidation_group(
             scope_str,
             target_layer,
             importance,
+            access_count,
             now,
-            now,
+            updated_at or now,
         ),
     )
     # vector_links.fragment_id 有 FK 引用热表: 先清向量再删源行

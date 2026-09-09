@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import math
+from datetime import timedelta
 from typing import TYPE_CHECKING, Any
 
 from ....utils.timeutil import from_iso, now_utc, to_iso
@@ -158,6 +159,21 @@ async def forget(
             state={"stats": stats},
             cursor=last_id,
         )
+    # ---------- 错误指纹过期清理(2026-09) ----------
+    # 无教训关联且 last_seen 超过 ttl 的指纹删除: 环境噪声错误(路径/版本串
+    # 随指纹永久累积)不该无限占表;有关联教训的指纹保留(教训闭环依赖计数)
+    fp_ttl_days = float(payload.get("fingerprint_ttl_days", 90))
+    if fp_ttl_days > 0:
+        cutoff = to_iso(now_utc() - timedelta(days=fp_ttl_days))
+        cur = await conn.execute(
+            "DELETE FROM error_fingerprints "
+            "WHERE lesson_id IS NULL AND last_seen < ?",
+            [cutoff],
+        )
+        if cur.rowcount:
+            await conn.commit()
+            stats["fingerprints_expired"] = cur.rowcount
+
     # ---------- 容量治理 pass(§ 主动优化二期) ----------
     if max_per_scope > 0:
         await _capacity_pass(conn, ctx, stats, payload_state={
@@ -219,7 +235,17 @@ async def _capacity_pass(
         excess = min(count - max_per_scope, len(scored))
         prune_ids = [fid for _, fid in scored[:excess]]
         if not prune_ids:
-            continue  # 全部受保护,豁免超配额
+            # 全部受保护,豁免超配额 — 但超额本身值得被看见(保护承诺
+            # 不变,容量治理对高价值写入无上界是已知取舍)
+            _logger.warning(
+                "capacity_all_protected",
+                scope=scope_name,
+                count=count,
+                cap=max_per_scope,
+                hint="全部条目 importance ≥ 保护线,如需硬上限用 "
+                "confirm_protected 显式确认",
+            )
+            continue
         await drop_fragment_vectors(conn, prune_ids)
         ph = ",".join("?" for _ in prune_ids)
         await conn.execute(

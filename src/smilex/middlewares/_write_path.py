@@ -171,6 +171,7 @@ class _WritePathMixin:
                     scope=request.scope,
                     scope_id=scope_id,
                     importance=request.importance,
+                    expires_at=request.expires_at,
                 )
                 if not primary_id:
                     primary_id = memory.id
