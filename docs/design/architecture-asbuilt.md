@@ -159,7 +159,9 @@ MemoryMiddleware(
 
 ```
 1. 实体锁      按 entity id 排序 acquire_many(EXCLUSIVE)   ← 排序即死锁预防
-2. 冲突检测    ConflictDetector 逐三元组:
+               (锁只覆盖 relations 解析+写入,事实入库在锁释放后 —
+                刻意缩小临界区,L1 片段 append-only 无需锁)
+2. 冲突检测    guard_triple_write 逐三元组:
                  - expected_version 不符 → VERSION_STALE
                  - base_version 并发写   → WRITE_WRITE
                  - 默认策略 AUTO_LAST(LWW);reject/manual → WriteStatus.CONFLICT
@@ -167,10 +169,17 @@ MemoryMiddleware(
 3. 事实抽取    facts = await extractor.extract(content)
                  PassThrough → [content](原文整块)
                  LLM         → 原子事实列表;任何异常降级回 [content]
+                 (打 llm_extract_degraded warning;PII 脱敏在抽取前 —
+                  占位符进 prompt 是取舍: 抽取产物源自已脱敏文本,
+                  不会裸写原文 PII)
+3.5 矛盾检测   带值 relation 落库前 check_new 四维检测(2026-09 接线),
+                 检出 → contradiction_detected warning,只留痕不阻断
 4. 逐条入库    每条 fact 一个 FuzzyMemory(继承 scope/importance/time_range)
                  - 常规: l0.put();内容 > promotion_threshold 时自动晋升
                  - facts_bypass_l0 且非 PassThrough: 直接 promotion.put 到 L1
                  (triple_ids 只挂在第一条上,避免图重复)
+                 - 会话收尾: close_session 全量晋升(2026-09,L0 持久化闭环);
+                   close() 对所有活跃会话 flush;单会话 ≥100 条 emit memory_full
 5. 图谱写入    entities 名称批量解析(H1: 单次查询),triples 单事务写入
 ```
 
@@ -380,32 +389,42 @@ semantic 任务重建;错误指纹表为设备本地数据不随包导出)、主
 
 ## 9. 并发控制
 
-三道防线(`concurrency/`):
+**实际两道防线 + 一层预留**(2026-09 诚实化修订;原"三道防线"中
+乐观版本层从未接入写路径):
 
-1. **应用层锁** `LockManager`:SHARED / EXCLUSIVE / UPDATE 兼容矩阵
-   (读共享、写排他、UPDATE 锁中间态),FIFO 等待队列,
+1. **应用层锁** `LockManager`(生效):SHARED / EXCLUSIVE / UPDATE
+   兼容矩阵(读共享、写排他、UPDATE 锁中间态),FIFO 等待队列,
    `default_timeout` 超时兜底(死锁预防第二重保障);
    `acquire_many` **按资源名排序获取**(主要死锁预防);
-   `upgrade` 支持锁升级(带死锁检测);`release_all(holder)` 崩溃清理
-2. **乐观版本** `ConflictDetector`:内存版本注册表;
-   `expected_version` 不符 → VERSION\_STALE,`base_version` 并发写 →
-   WRITE\_WRITE(CAS 风格);`ConflictResolver` 策略含 AUTO\_LAST(LWW)
-3. **DB 兜底** `ConcurrencyController.guard_triple_write`:同
-   (scope, subject, predicate) 活跃行唯一性检查(跨进程也成立)
+   `upgrade` 支持锁升级(带死锁检测);`release_all(holder)` 崩溃清理。
+   **进程内语义** — daemon 与 stdio 进程同开同一 db 时不互锁
+2. **DB 兜底** `ConcurrencyController.guard_triple_write`(生效):
+   同 (scope, subject, predicate) 活跃行检查 + supersession 闭合
+   (UPDATE ... AND valid_to IS NULL);状态类三元组另有 008 触发器在
+   插入事务内原子闭合旧行(**跨进程安全**)。已知残余: 语义类三元组
+   跨进程并发写可产生双现行 — 多值谓词领域合法、写入时矛盾检测可
+   发现;不建议同库双写者常驻(见 §11a)
+3. **乐观版本** `ConflictDetector`(预留,未接线):内存版本注册表与
+   CAS 检查仅有测试调用;单用户场景无实际 lost-update 面积,接入前
+   保持预留状态
 
 ## 10. 知识质量
 
 `quality/`:
 
 - **ContradictionDetector**:四类矛盾——VALUE(逆谓词对,如
-  喜欢/不喜欢)、NUMERIC(数值区间重叠)、TEMPORAL(时间区间重叠)、
-  CAUSAL(因果环);`check_new`(写入时)+ `scan`(全量巡检)
+  喜欢/不喜欢)、NUMERIC(数值超 10% 容差)、TEMPORAL(时间区间重叠)、
+  CAUSAL(因果环)。2026-09 接线状态: `check_new` 已挂写入路径
+  (LWW 覆盖前留痕,contradiction\_detected warning);`scan` 全量巡检
+  与矛盾报告落表**未做**(报告是内存对象,无消费方 — 需要时接调度或
+  复用 lessons 通道)
 - **Archiver**:冷热分层;默认保留 triples 365 天 / fragments 180 天;
   归档去向量(省空间)、`restore_archived` 可恢复;recall 传
   `include_archived=True` 时经非向量通道追加,内容前缀 `[归档]`;
-  已注册为可调度任务
+  2026-09 起 server lifespan 默认注册(每日 LOW,此前无宿主注册)
 - **ScopePromoter**:检测"多项目重复出现"的模式 → 提升到 global scope
-  (带最小项目数阈值,支持手动确认)
+  (带最小项目数阈值,支持手动确认);2026-09 起 server lifespan
+  默认注册(每日 LOW)
 - **quantization**:int8 标量量化工具(未接进 VectorStore,预留)
 
 ## 11. 服务化层
@@ -463,6 +482,21 @@ token_budget=4000 / enable_scheduler=true`,CLI 可覆盖 db/host/port):
   关联业务行,检索路径全部带 scope 过滤,天然隔离
 - **JWT/OAuth**: 未实现(本地单用户场景 API Key 已覆盖;mcp SDK 的
   TokenVerifier/AuthSettings 通道已预留,多租户需求出现时接入)
+
+### 11b. 已知限制(2026-09 评审记录,有意接受或待真实需求)
+
+- **跨进程语义类双现行**: daemon 与 stdio 同时写同一 db 时,语义类
+  三元组同键并发可产生双现行行(状态类由 008 触发器保证跨进程 LWW);
+  多值谓词领域合法、写入时矛盾检测可发现;建议同库单常驻写者
+- **审计无鉴权主体**: 单静态 key 下审计事件不区分来源;key 无 id/
+  轮换/吊销列表(轮换即全量换 key);需要多客户端时再设计
+- **daemon stop 的 pid 校验**: stop 对 stale pidfile + pid 复用场景
+  未校验进程命令行(理论可误杀);并发 start 有 TOCTOU 窗口
+- **L2 causal 上下文注入不暴露**: build_context 的 causal_triple_id
+  是库内参数,recall/MCP 不透传 — 因果探索走 memory_graph_query
+  mode=causal 旁路,语义不同(结构化返回 vs 上下文注入),有意取舍
+- **快照仅导热数据**: 归档表(triples_archive 等)不进 export_package,
+  老项目迁移会丢冷记忆(含归档开关为待办)
 
 ## 12. 降级矩阵
 

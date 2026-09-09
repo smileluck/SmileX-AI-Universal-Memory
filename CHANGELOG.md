@@ -8,6 +8,41 @@
 
 ### Added
 
+- **设计评审接线修复批(2026-09-09,三路子系统深审 → 六阶段落地)**:
+  - **L0 持久化闭环**: close_session 重定义为全量晋升 L1(原快照语义
+    废弃)、close() flush 所有活跃会话、FuzzyMemory 随身携带 scope_id、
+    新 MCP 工具 memory_session_end;event_sink 接线使 session_end→
+    forget / memory_full→consolidate 事件映射从死配置变活链路 —
+    修复默认配置(PassThrough + threshold=800)下短记忆随进程静默丢失
+  - **调度与质量机制默认接线**: server lifespan 调度器改用独立维护
+    引擎(消除 CheckpointStore 裸 commit 冲刷业务半事务的窗口);
+    archiver/scope_promoter 默认注册(365 天归档与跨项目提升此前在
+    生产部署下永不发生);新 CLI 子命令 maintain(一次性维护,
+    stdio 项目库的官方承接入口)
+  - **矛盾检测写入留痕**: check_new 挂 _write_relations(LWW 覆盖前
+    四维检测 → contradiction_detected warning,只留痕不阻断)
+  - **LLM 抽取降级可观测**: 异常降级打 warning(此前完全静默)、
+    构造未配 key warn 一次
+  - **生命周期语义修正**: consolidate 聚合行衰减锚点继承(成员最大
+    updated_at + access_count 求和,消除"整合=变相永久续命");forget
+    增错误指纹过期清理(默认 90 天,无教训关联);**TTL 链路激活**
+    (WriteRequest.expires_at → time_end → 到期淘汰,MCP 同名参数)
+  - **观测补齐**: GET /api/errors 错误指纹端点(教训闭环可见性)、
+    recall-test 响应 entity_resolved;面板召回表单增 entity/time 聚焦
+    输入 + 新「错误指纹」tab(浏览器 DOM 验证通过)
+  - app.state.service 暴露;测试 +12(装配/CLI/矛盾/抽取/锚点/指纹/
+    TTL/errors/entity_resolved)
+
+### Removed
+
+- **死重量清理(迁移 016)**: causal 任务与 causal_chains 表删除 —
+  事件无 emit 方且无时间触发(死任务)、表只写不读(检索走
+  trace_causal_chain CTE);hybrid 移除恒空 spatial 策略与
+  HybridQuery.location(写入链无 location 通道);老库升级路径实测;
+  as-built §9"三道防线"诚实化为两道+预留、§10 接线状态标注、
+  §11b 已知限制落档(跨进程语义双现行/审计无主体/key 无轮换/
+  daemon TOCTOU/快照仅热数据)
+
 - **semantic 任务升级: Louvain 社区检测轻量版(08 号修订记录落地)**:
   - 连通分量 → networkx 内置 `louvain_communities`(零新依赖)+ 固定
     seed + 实体/边加载 ORDER BY(确定性前提 — SQLite 无 ORDER BY 行序
