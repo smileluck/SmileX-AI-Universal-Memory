@@ -10,9 +10,11 @@ RRF 算法(§12.2):
 策略:
 - temporal: 时间范围查询 → triples
 - graph: 实体 N 度关系 → triples(subject/object 命中)
-- spatial: 位置附近 → locations(关联 triples 通过 location_id)
 - causal: 因果链追溯 → triples
-- semantic: 向量检索(L2 实现后接入,目前返回空)
+
+spatial 策略已移除(2026-09): 写入链从无 location 通道(HybridQuery.location
+无赋值方),原实现恒返回空 — queries/spatial.py 的查询函数保留导出为预留。
+语义检索在 L1 双通道(向量 KNN + FTS BM25)实现,L2 无此策略。
 """
 
 from __future__ import annotations
@@ -26,7 +28,6 @@ import aiosqlite
 from ...models import ScopeFilter
 from .causal import trace_causal_chain
 from .graph import find_n_degree_relations
-from .spatial import query_in_area
 from .temporal import query_in_range
 
 
@@ -37,11 +38,10 @@ class HybridQuery:
     每个非空字段触发对应的检索策略.
     """
 
-    text: str | None = None  # 语义检索(L2 接入,目前忽略)
     entity_id: str | None = None  # 图谱遍历起点
     time_range: tuple[datetime | str, datetime | str] | None = None  # (start, end)
-    location: tuple[float, float, float] | None = None  # (lng, lat, radius_m)
-    causal_triple_id: str | None = None  # 因果链起点
+    causal_triple_id: str | None = None  # 因果链起点(库内 API;服务层经
+    # memory_graph_query mode=causal 旁路,不进 recall 上下文)
     top_k_per_strategy: int = 20  # 单策略返回的 ID 数上限
 
 
@@ -133,26 +133,6 @@ async def _run_graph_strategy(
     return [r["id"] for r in rows]
 
 
-async def _run_spatial_strategy(
-    conn: aiosqlite.Connection,
-    query: HybridQuery,
-    scope_filter: ScopeFilter | None,
-) -> list[str]:
-    """空间策略:位置附近的 triples(通过 location 字段关联)."""
-    if query.location is None:
-        return []
-    lng, lat, radius_m = query.location
-    locations = await query_in_area(
-        conn, lng, lat, radius_m, scope_filter=scope_filter
-    )
-    if not locations:
-        return []
-    # temporal_fragments 表有 location_id,但 MVP 阶段 triples 表没有 location 字段
-    # 这里通过 entities.location 间接关联(简化版,实际可通过 entity_id 关联)
-    # 暂时返回空,留给 L2 完善空间-语义联合检索
-    return []
-
-
 async def _run_causal_strategy(
     conn: aiosqlite.Connection,
     query: HybridQuery,
@@ -205,10 +185,6 @@ async def hybrid_memory_search(
     graph_ids = await _run_graph_strategy(conn, query, scope_filter)
     if graph_ids:
         strategies.append(("graph", graph_ids))
-
-    spatial_ids = await _run_spatial_strategy(conn, query, scope_filter)
-    if spatial_ids:
-        strategies.append(("spatial", spatial_ids))
 
     causal_ids = await _run_causal_strategy(conn, query, scope_filter)
     if causal_ids:

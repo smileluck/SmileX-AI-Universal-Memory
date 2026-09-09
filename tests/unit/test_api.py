@@ -114,7 +114,6 @@ def test_health(client, tmp_path):
 def test_stats_extended_keys(client):
     data = client.get("/api/stats").json()
     assert data["l0_snapshots"] == 0
-    assert data["causal_chains"] == 0
     assert data["db_size_bytes"] > 0
 
 

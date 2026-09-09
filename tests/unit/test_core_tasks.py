@@ -129,13 +129,12 @@ async def _count(conn, where: str, params=()) -> int:
 
 
 async def test_register_core_tasks_all_registered(scheduler):
-    """5 类任务全部注册:可中断、优先级符合 §8.2(整合/因果 HIGH,遗忘 LOW)."""
+    """核心任务全部注册:可中断、优先级符合 §8.2(整合 HIGH,遗忘 LOW)."""
     for name in CORE_TASK_NAMES:
         assert scheduler.has_task(name)
     definitions = scheduler._definitions
     assert all(definitions[n].interruptible for n in CORE_TASK_NAMES)
     assert definitions["consolidate"].priority is TaskPriority.HIGH
-    assert definitions["causal"].priority is TaskPriority.HIGH
     assert definitions["forget"].priority is TaskPriority.LOW
 
 
@@ -145,15 +144,12 @@ async def test_default_triggers_registered(engine):
     register_core_tasks(
         sched,
         engine,
-        config=CoreTaskConfig(l1_pressure=lambda: False, potential_causal_links=lambda: False),
+        config=CoreTaskConfig(l1_pressure=lambda: False),
     )
     assert len(sched._time_triggers) == 6  # 整合/摘要/语义/遗忘/巡检 + dedup 近重复合并
-    for event in ("memory_full", "episode_end", "session_end", "causal_inference"):
+    for event in ("memory_full", "episode_end", "session_end"):
         assert sched._event_trigger.knows(event)
-    assert {r.name for r in sched._adaptive_trigger.rules} == {
-        "memory_pressure",
-        "causal_potential",
-    }
+    assert {r.name for r in sched._adaptive_trigger.rules} == {"memory_pressure"}
 
 
 # ---------- 退出标准 1: 整合任务自动 L1→L2 流转 ----------
@@ -375,39 +371,6 @@ async def test_summarization(engine, scheduler):
     await scheduler.submit("summarize", payload=payload)
     await scheduler.wait_idle(timeout=3.0)
     assert await _count(conn, "fragment_id = 's-long:summary'") == 1
-
-
-# ---------- 因果任务 ----------
-
-
-async def test_causal_chain_maintenance(engine, scheduler):
-    """因果: predecessor_id 链 → causal_chains 表(chain_id 确定性,重跑幂等)."""
-    conn = engine.conn
-    await _add_triple(conn, "t1", "e1", "导致", object_value="构建失败", confidence=0.9)
-    await _add_triple(conn, "t2", "e1", "导致", object_value="测试红灯",
-                      predecessor_id="t1", confidence=0.8)
-    await _add_triple(conn, "t3", "e1", "导致", object_value="发布延期",
-                      predecessor_id="t2", confidence=0.6)
-    await _add_triple(conn, "t4", "e2", "无关", object_value="孤立事实")  # 无链
-
-    task_id = await scheduler.submit("causal")
-    await scheduler.wait_idle(timeout=3.0)
-    assert scheduler.get_status(task_id).status is TaskStatus.COMPLETED
-
-    cur = await conn.execute("SELECT * FROM causal_chains")
-    rows = await cur.fetchall()
-    assert len(rows) == 1
-    chain = rows[0]
-    assert chain["chain_id"] == "chain:t3"  # 链尾确定性 ID
-    assert json.loads(chain["node_ids"]) == ["t1", "t2", "t3"]  # 根 → 尾
-    assert chain["support_count"] == 3
-    assert chain["confidence"] == pytest.approx(0.6)  # 链上最小 confidence
-
-    # 幂等: upsert by chain_id,重跑不膨胀
-    await scheduler.submit("causal")
-    await scheduler.wait_idle(timeout=3.0)
-    cur = await conn.execute("SELECT COUNT(*) AS c FROM causal_chains")
-    assert (await cur.fetchone())["c"] == 1
 
 
 # ---------- 语义任务 ----------

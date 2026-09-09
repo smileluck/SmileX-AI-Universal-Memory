@@ -26,8 +26,7 @@ async def collect_stats(
     result["vector_links"] = int((await cur.fetchone())[0])
     for table, key in (
         ("memory_l0_snapshot", "l0_snapshots"),
-        ("causal_chains", "causal_chains"),
-    ):
+        ):
         cur = await conn.execute(f"SELECT COUNT(*) FROM {table}")
         result[key] = int((await cur.fetchone())[0])
     result["db_size_bytes"] = (

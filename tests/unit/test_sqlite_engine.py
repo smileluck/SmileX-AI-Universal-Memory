@@ -114,7 +114,6 @@ async def test_all_tables_present(engine):
         "triples",
         "locations",
         "temporal_fragments",
-        "causal_chains",
         "vector_links",
         "checkpoints",
         "project_current_state",

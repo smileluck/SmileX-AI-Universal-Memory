@@ -81,7 +81,6 @@ def test_all_base_tables_created(db_with_schema):
         "triples",
         "locations",
         "temporal_fragments",
-        "causal_chains",
         "vector_links",
         "checkpoints",
         "project_current_state",
@@ -289,24 +288,6 @@ def test_triples_check_scope_enum(db_with_schema):
             "INSERT INTO triples(id, triple_id, subject_id, predicate, object_value, "
             "scope, valid_from) "
             "VALUES ('t1', 'tid1', 's1', 'p', 'v', 'invalid_scope', '2026-01-01T00:00:00Z')"
-        )
-
-
-def test_causal_chains_check_json_valid(db_with_schema):
-    """CHECK: node_ids 必须是有效 JSON."""
-    with pytest.raises(sqlite3.IntegrityError):
-        db_with_schema.execute(
-            "INSERT INTO causal_chains(id, chain_id, node_ids, created_at, updated_at) "
-            "VALUES ('c1', 'ch1', 'not-json', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')"
-        )
-
-
-def test_causal_chains_check_node_ids_nonempty(db_with_schema):
-    """CHECK: node_ids 至少 1 个元素."""
-    with pytest.raises(sqlite3.IntegrityError):
-        db_with_schema.execute(
-            "INSERT INTO causal_chains(id, chain_id, node_ids, created_at, updated_at) "
-            "VALUES ('c1', 'ch1', '[]', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')"
         )
 
 

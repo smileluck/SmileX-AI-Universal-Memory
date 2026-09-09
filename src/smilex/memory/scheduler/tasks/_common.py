@@ -10,7 +10,6 @@ from typing import Any
 TASK_CONSOLIDATE = "consolidate"
 TASK_FORGET = "forget"
 TASK_SUMMARIZE = "summarize"
-TASK_CAUSAL = "causal"
 TASK_SEMANTIC = "semantic"
 TASK_DB_INTEGRITY = "db_integrity"
 TASK_DEDUP = "dedup"
@@ -18,7 +17,6 @@ CORE_TASK_NAMES = (
     TASK_CONSOLIDATE,
     TASK_FORGET,
     TASK_SUMMARIZE,
-    TASK_CAUSAL,
     TASK_SEMANTIC,
     TASK_DB_INTEGRITY,
     TASK_DEDUP,

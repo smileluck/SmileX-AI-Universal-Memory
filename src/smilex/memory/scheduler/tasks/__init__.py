@@ -1,6 +1,6 @@
 """5 类核心任务 — Layer 3c(主文档 §8.2 / §14.3 P0 范围;analyse memory-task-scheduler §2).
 
-整合(consolidate)/ 遗忘(forget)/ 摘要(summarize)/ 因果(causal)/ 语义(semantic),
+整合(consolidate)/ 遗忘(forget)/ 摘要(summarize)/ 语义(semantic),
 全部规则版(无 LLM):HashEmbedder 无语义相似度,聚合/分组一律用确定性规则
 (同实体 / 同 scope / 关键词),保证嵌入式环境零依赖可跑.
 
@@ -15,7 +15,7 @@
 - payload 均支持: scope(全路径,如 "project:proj_a")/ batch_size / step_delay(测试限速)
 
 事务约定:直接用 StorageEngine.conn(同 CheckpointStore),每批写完 commit 一次;
-schema 未改(复用 temporal_fragments / triples / causal_chains / checkpoints).
+schema 未改(复用 temporal_fragments / triples / checkpoints).
 """
 
 from __future__ import annotations
@@ -32,7 +32,6 @@ from ._common import (
     SEMANTIC_COMMUNITY_PREFIX,
     SUMMARY_ID_SUFFIX,
     SUMMARY_PREFIX,
-    TASK_CAUSAL,
     TASK_CONSOLIDATE,
     TASK_DB_INTEGRITY,
     TASK_DEDUP,
@@ -40,7 +39,6 @@ from ._common import (
     TASK_SEMANTIC,
     TASK_SUMMARIZE,
 )
-from .causal import causal
 from .consolidate import consolidate
 from .dedup import dedup
 from .forget import forget
@@ -58,7 +56,7 @@ class CoreTaskRunner:
     """核心任务的执行函数集合(持有 StorageEngine,方法即 run 函数).
 
     每个方法签名符合 InterruptibleRun: `async (ctx, payload) -> dict(统计)`;
-    实现委托至同名任务模块(consolidate/forget/summarize/causal/semantic/
+    实现委托至同名任务模块(consolidate/forget/summarize/semantic/
     db_integrity)。summarizer 可注入 LLM 后端(§5 演进路径,默认规则版);
     vector_store 注入后 semantic 任务的 L3 社区缓存即时重嵌向量。
     """
@@ -87,9 +85,6 @@ class CoreTaskRunner:
 
     async def summarize(self, ctx: InterruptContext, payload: dict[str, Any]) -> dict:
         return await summarize(self._storage, ctx, payload, summarizer=self._summarizer)
-
-    async def causal(self, ctx: InterruptContext, payload: dict[str, Any]) -> dict:
-        return await causal(self._storage, ctx, payload)
 
     async def semantic(self, ctx: InterruptContext, payload: dict[str, Any]) -> dict:
         return await semantic(
@@ -126,8 +121,6 @@ class CoreTaskConfig:
 
     l1_pressure: Any = None  # Callable[[], bool]: L1 使用率 > 80%(§8.3 记忆压力)
     memory_pressure_cooldown: float = 300.0  # 5 分钟
-    potential_causal_links: Any = None  # Callable[[], bool]: 存在潜在因果链接
-    causal_cooldown: float = 300.0  # 5 分钟
 
 
 def register_core_tasks(
@@ -143,7 +136,7 @@ def register_core_tasks(
     优先级(§8.2): 整合/因果 HIGH,摘要/语义 MEDIUM,遗忘/巡检 LOW;全部可中断.
     触发器默认:
     - 时间: 整合 1h / 摘要 30min / 语义 2h / 遗忘 1d / 巡检 1d(均不立即触发)
-    - 事件: memory_full→整合 / episode_end→摘要 / session_end→遗忘 / causal_inference→因果
+    - 事件: memory_full→整合 / episode_end→摘要 / session_end→遗忘
     - 自适应: 记忆压力→整合 / 潜在因果→因果(条件由 config 注入,带冷却)
 
     Args:
@@ -191,15 +184,6 @@ def register_core_tasks(
             priority=TaskPriority.MEDIUM,
             interruptible=True,
             description="长 fragment 摘要压缩(默认规则截取;summarizer 可注入 LLM 后端)",
-        )
-    )
-    scheduler.register(
-        TaskDefinition(
-            name=TASK_CAUSAL,
-            run=runner.causal,
-            priority=TaskPriority.HIGH,
-            interruptible=True,
-            description="因果链维护(predecessor_id → causal_chains)",
         )
     )
     scheduler.register(
@@ -269,26 +253,14 @@ def register_core_tasks(
         scheduler.add_event_mapping("memory_full", TASK_CONSOLIDATE, TaskPriority.HIGH)
         scheduler.add_event_mapping("episode_end", TASK_SUMMARIZE, TaskPriority.MEDIUM)
         scheduler.add_event_mapping("session_end", TASK_FORGET, TaskPriority.LOW)
-        scheduler.add_event_mapping("causal_inference", TASK_CAUSAL, TaskPriority.HIGH)
 
-    if config.enable_adaptive_rules:
-        if config.l1_pressure is not None:
+    if config.enable_adaptive_rules and config.l1_pressure is not None:
             scheduler.add_adaptive_rule(
                 AdaptiveRule(
                     name="memory_pressure",
                     task_name=TASK_CONSOLIDATE,
                     condition=config.l1_pressure,
                     cooldown_seconds=config.memory_pressure_cooldown,
-                    priority=TaskPriority.HIGH,
-                )
-            )
-        if config.potential_causal_links is not None:
-            scheduler.add_adaptive_rule(
-                AdaptiveRule(
-                    name="causal_potential",
-                    task_name=TASK_CAUSAL,
-                    condition=config.potential_causal_links,
-                    cooldown_seconds=config.causal_cooldown,
                     priority=TaskPriority.HIGH,
                 )
             )

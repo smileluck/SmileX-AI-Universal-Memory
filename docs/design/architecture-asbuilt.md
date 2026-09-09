@@ -58,7 +58,7 @@
    │                    ▼                           │
    └──────────► SQLite 单文件库(schema v13)  ◄────────┘
             entities / triples / temporal_fragments
-            causal_chains / locations(R-tree) / vec / fts
+            locations(R-tree) / vec / fts
                    ▲                    ▲
      MemoryTaskScheduler(consolidate/forget/…  5 核心任务)
      bootstrap(冷启动/种子/批量导入/跨项目克隆)
@@ -86,7 +86,7 @@ src/smilex/
 │   │                     #       graph.py(Entity/Triple/CausalChain) scope.py enums.py
 │   │                     #       serialization.py(msgpack)
 │   ├── storage/          # L1 存储: sqlite_engine / storage_engine / vector_store
-│   │   ├── queries/      #   temporal / graph / spatial / causal / fts / hybrid
+│   │   ├── queries/      #   temporal / graph / causal / fts / hybrid(spatial 预留)
 │   │   └── schema/       #   001..013 迁移 SQL,SCHEMA_VERSION=13
 │   ├── lifecycle/        # L2 生命周期: context_builder / promotion / l0_working_memory
 │   │                     #   / l0_snapshot / token_counter(embedder/reranker/extractor
@@ -204,9 +204,10 @@ created_at`。修复前一律用墙钟 created\_at,历史对话灌入时真实�
                         hybrid_memory_search(top_k=10):
                           temporal → query_in_range
                           graph    → find_n_degree_relations(递归 CTE BFS)
-                          spatial  → query_in_area(R-tree bbox + Haversine)
                           causal   → trace_causal_chain
                           各策略 top_k_per_strategy=20 → RRF(k=60)
+                          (spatial 策略 2026-09 移除: 写入链无 location
+                           通道,原实现恒空;查询函数保留为预留)
   去重: memory_id 全局唯一,优先级 L0 > L1 > L2
   排序: (层优先级, -score)
 
@@ -299,7 +300,7 @@ cache 64MB / foreign\_keys / busy\_timeout 5000ms);迁移按
 | 001/002 | entities / triples         | triples 带 valid\_from/valid\_to 双时态、predecessor\_id 因果链指针                  |
 | 003     | locations + R-tree 虚拟表     | bbox 预过滤 + Haversine 精算;层级路径 LIKE 查询                                       |
 | 004     | temporal\_fragments        | L1 主体: content/layer/time\_start/time\_end/scope/importance                |
-| 005     | causal\_chains             | 调度器 causal 任务维护                                                            |
+| 005     | causal\_chains             | 已废弃 — 016 迁移 DROP(2026-09 死重量清理: 表只写不读,检索走 trace\_causal\_chain CTE 直遍 predecessor) |
 | 006     | vector\_links              | 向量 ↔ 三种业务行(fragment/entity/triple)关联                                       |
 | 007/009 | checkpoints / l0\_snapshot | 任务断点(msgpack BLOB cursor)/ L0 快照(带过期清理)                                    |
 | 008     | project\_current\_state    | 项目态                                                                        |
@@ -339,7 +340,7 @@ cache 64MB / foreign\_keys / busy\_timeout 5000ms);迁移按
 主动让出,进度+步号+游标存 checkpoints 表,msgpack 编码)/
 PRIORITY\_INHERITANCE;`resume` 从断点续跑。
 
-核心任务(`scheduler/tasks/` 包: consolidate/forget/summarize/causal/
+核心任务(`scheduler/tasks/` 包: consolidate/forget/summarize/
 semantic 各一模块 + `_common.py` 共享子句,`__init__.py` 的 `CoreTaskRunner`
 为薄门面;`register_core_tasks` 配默认触发器):
 
@@ -349,7 +350,7 @@ semantic 各一模块 + `_common.py` 共享子句,`__init__.py` 的 `CoreTaskRun
 | forget      | 留存分 `score = importance × 0.5^(age/half_life) × min(3, 1+log10(1+access_count))`,age 锚点取 max(updated\_at, last\_accessed\_at)(使用即续命+常用即升值);低于 threshold → 删除(默认)或降权;删除守卫 importance ≥ protect\_importance(默认 0.9,confirm\_protected 可越过);尾段容量 pass: max\_per\_scope 超额修剪 | half\_life\_days=30,threshold=0.1,protect=0.9,max\_per\_scope=0(关) |
 | dedup       | 近重复合并(§ 主动优化): FTS trigram 短语找同 scope/layer 候选 + 字符 bigram Jaccard ≥ 0.7 确认;幸存者=较早 created\_at,吸收访问计数/时间区间/实体;重复行连同向量删除 | 每日 LOW,threshold=0.7,min\_length=12 |
 | summarize   | 规则式摘要(非 LLM),summary\_length 可调                                                                       | <br />                            |
-| causal      | 遍历 predecessor\_id 链维护 causal\_chains 表                                                               | <br />                            |
+
 | semantic    | Louvain 社区检测(2026-09 从连通分量升级): 分宇宙建图(global 单独 + 每个 project/tenant ∪ global,对齐 recall 检索视角)+ 加权无向图(实体对间三元组条数为边权)+ 固定 seed/ORDER BY 确定性;L3 缓存 **diff 增量刷新**(key=md5(成员 id 排序),数据未变重跑零写入,消失社区先清向量再删行 FK 安全);注入 vector\_store 时社区缓存即时重嵌进 KNN 通道(此前仅 BM25 可命中) | 每 2h MEDIUM,min\_component=2,top\_k=5,resolution 可调 |
 
 `bootstrap/` 子包(冷启动):向导问答(`project_bootstrap` +
@@ -580,7 +581,7 @@ token_budget=4000 / enable_scheduler=true`,CLI 可覆盖 db/host/port):
 | entities / triples | 图谱节点与三元组;triples 带 valid_from/to(双时态)与 predecessor_id |
 | 双时态(bitemporal) | 三元组同时记录"业务有效时间"(valid_from/to)与写入时间,支持时间点回溯 |
 | predecessor_id | triples 上的因果链指针:这条事实由哪条先前事实演变而来 |
-| causal_chains | 调度器 causal 任务维护的因果链物化表 |
+| causal_chains | 已删除(016 迁移)— 只写不读的物化,检索走 triples.predecessor CTE |
 | vector_links | 向量行 ↔ 业务行(fragment/entity/triple)的关联表 |
 | fts_fragments | FTS5 external-content 虚拟表(不复制内容,靠 rowid 映射回 temporal_fragments,触发器保同步) |
 | sqlite-vec | SQLite 向量扩展,提供 FLOAT[1024] 虚拟表与 KNN |
