@@ -539,3 +539,11 @@ pre {
 .bdg.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, transparent); background: color-mix(in srgb, var(--ok) 10%, transparent); }
 .bdg.warn { color: #b8860b; border-color: color-mix(in srgb, #b8860b 45%, transparent); background: color-mix(in srgb, #b8860b 10%, transparent); }
 .bdg.crit { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 45%, transparent); background: color-mix(in srgb, var(--danger) 10%, transparent); }
+
+/* 错误指纹区(2026-09) */
+.section-hint {
+  color: var(--muted, #888);
+  font-size: 12px;
+  margin: 0 0 10px;
+}
+.w-num { text-align: right; }

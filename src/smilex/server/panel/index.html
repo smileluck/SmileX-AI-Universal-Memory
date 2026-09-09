@@ -21,6 +21,7 @@
     <button class="tab active" data-tab="overview">概览</button>
     <button class="tab" data-tab="browse">记忆浏览</button>
     <button class="tab" data-tab="recall">召回测试</button>
+    <button class="tab" data-tab="errors">错误指纹</button>
   </nav>
   <div class="top-status">
     <span id="health-pill" class="pill" title=""><span class="dot"></span>连接中…</span>
@@ -115,6 +116,9 @@
       <input name="query" placeholder="输入查询,测试召回效果" required>
       <input name="top_k" type="number" value="10" min="1" max="50" title="返回条数 top_k">
       <input name="session_id" value="panel-debug" title="会话 ID(影响 L0 会话记忆命中)">
+      <input name="entity" placeholder="实体聚焦(可选)" title="实体名/ID — 触发 L2 图谱策略">
+      <input name="time_start" placeholder="时间从(可选)" title="ISO 时间 — 触发 L2 时序策略">
+      <input name="time_end" placeholder="时间到(可选)" title="ISO 时间 — 与 time_start 成对">
       <input name="token_budget" type="number" min="100" step="100"
         placeholder="token 预算(默认服务配置)" title="上下文 token 预算">
       <button type="submit" class="btn" id="recall-submit">召回</button>
@@ -135,6 +139,23 @@
         </thead>
         <tbody>
           <tr class="empty-row"><td colspan="5">提交查询后,这里显示召回来源明细</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- 错误指纹 -->
+  <section id="tab-errors" class="panel">
+    <p class="section-hint">错误指纹 = sha256(scope|code|规范化message) 同类错误聚合计数;
+      第 2 次出现会提示沉淀【教训】(见 memory_report_error 工具)。</p>
+    <div class="table-wrap">
+      <table id="errors-table">
+        <thead>
+          <tr><th>指纹</th><th class="w-num">次数</th><th>示例 code</th>
+              <th>示例 message</th><th>最近出现</th><th>教训</th></tr>
+        </thead>
+        <tbody>
+          <tr class="empty-row"><td colspan="6">暂无错误指纹登记</td></tr>
         </tbody>
       </table>
     </div>

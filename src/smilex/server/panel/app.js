@@ -338,6 +338,11 @@ async function recallTest(ev) {
   };
   const budget = Number(f.token_budget.value);
   if (budget > 0) body.token_budget = Math.floor(budget);
+  const entity = f.entity.value.trim();
+  if (entity) body.entity = entity;
+  const ts = f.time_start.value.trim(), te = f.time_end.value.trim();
+  if (ts) body.time_start = ts;
+  if (te) body.time_end = te;
   btn.disabled = true;
   btn.textContent = "召回中…";
   $("#recall-meta").textContent = "";
@@ -355,9 +360,12 @@ async function recallTest(ev) {
     });
     const badges = Object.entries(counts)
       .map(([l, n]) => tag(`${l} ×${n}`, String(l).toLowerCase())).join("");
+    let focus = "";
+    if (resp.entity_resolved === true) focus = " · " + tag("实体聚焦生效", "l1");
+    else if (resp.entity_resolved === false) focus = " · " + tag("实体未解析(已降级无聚焦)", "l2");
     $("#recall-meta").innerHTML =
       `耗时 ${fmtNum(resp.elapsed_ms)} ms · tokens ${fmtNum(resp.token_count)}` +
-      ` · 来源 ${(resp.sources || []).length} 条 ${badges}`;
+      ` · 来源 ${(resp.sources || []).length} 条 ${badges}${focus}`;
     $("#recall-result").hidden = false;
     $("#recall-context").textContent = resp.context || "(无召回内容)";
     $("#recall-sources tbody").innerHTML = (resp.sources || []).length
@@ -402,6 +410,29 @@ $("#copy-context").addEventListener("click", async () => {
   setTimeout(() => { btn.textContent = "复制"; }, 1500);
 });
 
+/* ---------- 错误指纹(教训闭环可见性,2026-09) ---------- */
+
+async function loadErrors() {
+  const table = $("#errors-table");
+  if (!table) return;
+  try {
+    const rows = await getJSON("/api/errors?limit=100");
+    const tbody = table.querySelector("tbody");
+    tbody.innerHTML = rows.length
+      ? rows.map(r => `<tr>` +
+          `<td class="mono">${esc(r.fingerprint)}</td>` +
+          `<td class="w-num">${fmtNum(r.count)}</td>` +
+          `<td class="mono">${esc(r.sample_code || "—")}</td>` +
+          `<td class="snippet">${esc(r.sample_message || "—")}</td>` +
+          `<td class="mono">${esc((r.last_seen || "").slice(0, 19))}</td>` +
+          `<td>${r.has_lesson ? tag("已有教训", "l1") : tag("未沉淀", "l2")}</td>` +
+          `</tr>`).join("")
+      : emptyRow(6, "暂无错误指纹 — agent 通过 memory_report_error 登记后显示");
+  } catch (e) {
+    /* auth 裁剪或服务不可达时静默,健康 pill 已有提示 */
+  }
+}
+
 /* ---------- 自动刷新 ---------- */
 
 let refreshTimer = null;
@@ -414,6 +445,7 @@ function startRefresh() {
     loadHealth();
     loadStats();
     loadTasks();
+    loadErrors();
   }, REFRESH_MS);
 }
 
@@ -455,4 +487,5 @@ if (localStorage.getItem("smilex.autorefresh") === "0") {
 loadHealth();
 loadStats();
 loadTasks();
+loadErrors();
 browse({ preventDefault() {}, target: $("#browse-form") });

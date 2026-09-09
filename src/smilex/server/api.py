@@ -8,7 +8,8 @@
 - GET  /api/memories     浏览/关键词搜索(entities/triples/fragments 联合,
                          fragments 关键词走 FTS5 BM25,trigram 支持中文子串)
 - GET  /api/memory/{id}  单条详情
-- POST /api/recall-test  召回调试(返回上下文 + 来源 + 耗时)
+- POST /api/recall-test  召回调试(返回上下文 + 来源 + 耗时 + entity_resolved)
+- GET  /api/errors       错误指纹列表(count 降序,教训闭环可见性)
 - GET  /api/tasks        调度任务断点(最近运行)列表
 
 不提供写操作: 写入统一走 MCP 工具(memory_write),面板保持只读。
@@ -344,10 +345,12 @@ def create_api_router(service: MemoryService) -> APIRouter:
         from .mcp_server import parse_time_range, resolve_entity_ref
 
         entity_filter: str | None = None
+        entity_resolved: bool | None = None  # None=未聚焦 / True/False=解析结果
         if body.entity:
             entity_filter = await resolve_entity_ref(
                 memory.engine.conn, body.entity
             )
+            entity_resolved = entity_filter is not None
         start = time.monotonic()
         resp = await memory.recall(
             RecallRequest(
@@ -361,8 +364,26 @@ def create_api_router(service: MemoryService) -> APIRouter:
         )
         return {
             **resp.to_dict(),
+            "entity_resolved": entity_resolved,
             "elapsed_ms": int((time.monotonic() - start) * 1000),
         }
+
+    @router.get("/errors")
+    async def errors(limit: int = 50) -> list[dict[str, Any]]:
+        """错误指纹列表(count 降序;教训闭环可见性,面板「错误指纹」区数据源)."""
+        memory = await service.get()
+        cur = await memory.engine.conn.execute(
+            "SELECT fingerprint, count, first_seen, last_seen, sample_code, "
+            "sample_message, lesson_id FROM error_fingerprints "
+            "ORDER BY count DESC, last_seen DESC LIMIT ?",
+            [max(1, min(limit, 500))],
+        )
+        rows = [dict(r) for r in await cur.fetchall()]
+        for row in rows:
+            row["has_lesson"] = row.pop("lesson_id") is not None
+            msg = str(row.get("sample_message") or "")
+            row["sample_message"] = msg[:120]
+        return rows
 
     @router.get("/tasks")
     async def tasks() -> list[dict[str, Any]]:

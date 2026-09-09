@@ -162,3 +162,41 @@ def test_app_lifespan_registers_quality_tasks(tmp_path):
             assert scheduler.has_task(name), name
         assert scheduler.has_task("archive")  # Layer 5 归档(每日)
         assert scheduler.has_task("scope_promotion")  # 跨项目提升(每日)
+
+
+def test_errors_endpoint(client, tmp_path):
+    """GET /api/errors: count 降序 + has_lesson 状态 + message 截断."""
+    import sqlite3
+
+    db = tmp_path / "panel_test.db"
+    with sqlite3.connect(db) as conn:
+        for fp, cnt, lesson in [
+            ("fp-major", 7, None), ("fp-lesson", 3, "lesson-id-1"),
+        ]:
+            conn.execute(
+                "INSERT INTO error_fingerprints(fingerprint, count, first_seen, "
+                "last_seen, sample_code, sample_message, lesson_id) "
+                "VALUES (?, ?, '2026-01-01T00:00:00Z', '2026-09-01T00:00:00Z', "
+                "'E_TEST', ?, ?)",
+                (fp, cnt, "m" * 200, lesson),
+            )
+    resp = client.get("/api/errors")
+    assert resp.status_code == 200
+    rows = resp.json()
+    assert [r["fingerprint"] for r in rows] == ["fp-major", "fp-lesson"]
+    assert rows[0]["count"] == 7 and rows[0]["has_lesson"] is False
+    assert rows[1]["has_lesson"] is True
+    assert len(rows[0]["sample_message"]) == 120  # 截断
+
+
+def test_recall_test_entity_resolved_field(client):
+    """recall-test 响应带 entity_resolved(None=未聚焦 / False=解析失败降级)."""
+    resp = client.post(
+        "/api/recall-test",
+        json={"query": "x", "entity": "不存在的实体"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["entity_resolved"] is False
+
+    resp = client.post("/api/recall-test", json={"query": "x"})
+    assert resp.json()["entity_resolved"] is None
