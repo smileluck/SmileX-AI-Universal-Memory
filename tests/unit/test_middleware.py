@@ -324,7 +324,13 @@ async def test_recall_respects_token_budget(mw):
 
 # ---------- M.5 close_session / restore_session ----------
 
-async def test_close_and_restore_session(mw):
+
+async def test_close_session_promotes_all_to_l1(mw):
+    """close_session 新语义(2026-09): 全部 L0 晋升 L1 持久化,而非快照.
+
+    短记忆(远低于 800 token 阈值)也会晋升 — 修复默认 PassThrough 配置下
+    "会话结束/进程退出短记忆静默丢失"的断链。
+    """
     await _init_project(mw)
     ids = []
     for content in ("决定: 用 SQLite 单机存储", "约定: 全路径 scope"):
@@ -333,17 +339,16 @@ async def test_close_and_restore_session(mw):
             session_id=SESSION,
         )
         ids.append(wr.memory_id)
+    assert mw.l0.list(SESSION)  # 写入时留在 L0(短内容不触发阈值晋升)
 
-    saved = await mw.close_session(SESSION)
-    assert saved == 2
+    promoted = await mw.close_session(SESSION)
+    assert promoted == 2
     assert mw.l0.list(SESSION) == []
-    rr = await mw.recall(RecallRequest(query="存储"), session_id=SESSION)
-    assert not (set(ids) & {s.id for s in rr.sources})
-
-    restored = await mw.restore_session(SESSION)
-    assert restored == 2
-    rr = await mw.recall(RecallRequest(query="存储"), session_id=SESSION)
+    # 跨会话可检索(换了 session 也能召回 — 持久化的意义)
+    rr = await mw.recall(RecallRequest(query="存储"), session_id="other-session")
     assert set(ids) <= {s.id for s in rr.sources}
+    # 再关闭一次: 幂等,无内容可晋升
+    assert await mw.close_session(SESSION) == 0
 
 
 async def test_close_session_without_persist(mw):
@@ -352,24 +357,50 @@ async def test_close_session_without_persist(mw):
         WriteRequest(scope=MemoryScope.PROJECT, content="临时记忆"),
         session_id=SESSION,
     )
-    saved = await mw.close_session(SESSION, persist=False)
-    assert saved == 1
-    assert await mw.restore_session(SESSION) == 0
+    promoted = await mw.close_session(SESSION, persist=False)
+    assert promoted == 0  # 显式丢弃,不晋升
+    assert mw.l0.list(SESSION) == []
 
 
-async def test_restore_session_after_restart(tmp_path):
-    """跨实例: 关闭 middleware 后新实例从同一 db 恢复 L0 快照."""
+async def test_close_flushes_active_sessions(tmp_path):
+    """close() 对所有活跃会话 flush: 进程退出不丢 L0 记忆(持久化闭环)."""
     db = tmp_path / "restart.db"
     async with MemoryMiddleware(db) as m:
+        await m.initialize_project(ProjectInitRequest(name="flush-proj"))
         wr = await m.write(
-            WriteRequest(scope=MemoryScope.GLOBAL, content="重启后要恢复的记忆"),
+            WriteRequest(scope=MemoryScope.PROJECT, content="进程退出前最后的记忆"),
             session_id=SESSION,
         )
-        assert await m.close_session(SESSION) == 1
-
+        assert m.l0.list(SESSION)  # 仍在 L0
+    # async with 退出 → close() → flush;新实例跨进程可召回
+    # (先 initialize_project 复用同名 scope,否则默认 scope 过滤不含该项目)
     async with MemoryMiddleware(db) as m2:
+        await m2.initialize_project(ProjectInitRequest(name="flush-proj"))
         assert m2.l0.list(SESSION) == []
-        assert await m2.restore_session(SESSION) == 1
-        memory = m2.l0.get(SESSION, wr.memory_id)
-        assert memory is not None
-        assert memory.content == "重启后要恢复的记忆"
+        rr = await m2.recall(RecallRequest(query="最后的记忆"), session_id="s-new")
+        assert wr.memory_id in {s.id for s in rr.sources}
+
+
+async def test_close_session_emits_session_end(mw):
+    """close_session 经 event_sink 发 session_end 事件(调度器映射 → forget)."""
+    await _init_project(mw)
+    events: list[tuple[str, object]] = []
+    mw.event_sink = lambda et, payload=None: events.append((et, payload))
+    await mw.write(
+        WriteRequest(scope=MemoryScope.PROJECT, content="x"), session_id=SESSION
+    )
+    await mw.close_session(SESSION)
+    assert ("session_end", {"session_id": SESSION}) in events
+
+
+async def test_write_emits_memory_full_at_threshold(mw):
+    """单会话 L0 达到阈值时 emit memory_full(调度器映射 → consolidate)."""
+    await _init_project(mw)
+    events: list[tuple[str, object]] = []
+    mw.event_sink = lambda et, payload=None: events.append((et, payload))
+    for i in range(100):
+        await mw.write(
+            WriteRequest(scope=MemoryScope.PROJECT, content=f"记忆 {i}"),
+            session_id=SESSION,
+        )
+    assert ("memory_full", {"session_id": SESSION}) in events

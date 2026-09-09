@@ -86,6 +86,27 @@ async def test_recall_empty_db(service):
     assert resp["context"] == "" or resp["token_count"] == 0
 
 
+async def test_session_end_promotes_l0(service):
+    """memory_session_end: 会话 L0 短记忆全部晋升 L1(持久化闭环)."""
+    server = create_mcp_server(service)
+    written = await _call(
+        server,
+        "memory_write",
+        {"content": "会话结束要持久的短记忆", "session_id": "se1",
+         "scope": "global"},
+    )
+    assert written["status"] == "saved"
+
+    resp = await _call(server, "memory_session_end", {"session_id": "se1"})
+    assert resp == {"session_id": "se1", "promoted": 1}
+
+    # 跨会话可召回(新 session_id 也能命中 → 已落 L1)
+    recalled = await _call(
+        server, "memory_recall", {"query": "短记忆", "session_id": "se2"}
+    )
+    assert "短记忆" in recalled["context"]
+
+
 async def _seed_person_graph(service):
     """直接落库一张小图(工具层测试种子,绕开写入路径的实体解析细节).
 

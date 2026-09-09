@@ -33,6 +33,7 @@ StorageEngine 方法(write_entity/write_triple)各自管理事务.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -44,6 +45,7 @@ from ..memory.lifecycle.l0_snapshot import L0SnapshotStore
 from ..memory.lifecycle.l0_working_memory import L0WorkingMemory
 from ..memory.lifecycle.promotion import PromotionManager
 from ..memory.lifecycle.token_counter import TokenCounter
+from ..memory.observability import get_logger
 from ..memory.pii import NoopPIIMasker, PIIMasker
 from ..memory.reranker import Reranker
 from ..memory.storage.storage_engine import StorageEngine
@@ -133,6 +135,18 @@ class MemoryMiddleware(_WritePathMixin, _RecallPathMixin, _BootstrapFacadeMixin)
         self._bootstrap: ProjectBootstrap | None = None
         # 最近一次 initialize_project 的项目 ID,write 的 scope_id 缺省值
         self._current_scope_id: str | None = None
+        # 事件出口(server 层注入 scheduler.emit;None = 无调度器,空操作).
+        # 事件类型见调度器映射: session_end → forget / memory_full → consolidate
+        self.event_sink: Callable[[str, dict | None], object] | None = None
+
+    def _emit_event(self, event_type: str, payload: dict | None = None) -> None:
+        """事件转发(fire-and-forget): event_sink 未接线时空操作,失败只留痕."""
+        if self.event_sink is None:
+            return
+        try:
+            self.event_sink(event_type, payload)
+        except Exception:  # noqa: BLE001 — 事件失败不影响写入/会话关闭
+            get_logger("memory").warning("event_emit_failed", event=event_type)
 
     # ==================== 生命周期 ====================
 
@@ -149,7 +163,19 @@ class MemoryMiddleware(_WritePathMixin, _RecallPathMixin, _BootstrapFacadeMixin)
         )
 
     async def close(self) -> None:
-        """关闭: 清空 L0 热缓存,关闭自建的存储引擎."""
+        """关闭: flush 所有活跃会话到 L1(持久化闭环),再清 L0、关自建引擎.
+
+        未 flush 的 L0 记忆会随进程消失 — 此前版本直接 clear() 丢弃,
+        是"默认配置下短记忆不持久"的根因之一。
+        """
+        if self._engine.is_initialized:
+            for sid in self._l0.session_ids():
+                try:
+                    await self.close_session(sid)
+                except Exception:  # noqa: BLE001 — 单会话 flush 失败不阻断关闭
+                    get_logger("memory").warning(
+                        "session_flush_failed", session_id=sid
+                    )
         self._l0.clear()
         if self._owns_engine:
             await self._engine.close()
@@ -261,23 +287,43 @@ class MemoryMiddleware(_WritePathMixin, _RecallPathMixin, _BootstrapFacadeMixin)
     # ==================== M.5 会话生命周期 ====================
 
     async def close_session(self, session_id: str, *, persist: bool = True) -> int:
-        """关闭会话: L0 快照持久化(save_snapshot)+ 清理热缓存,返回快照条数.
+        """关闭会话: 该会话全部 L0 记忆晋升 L1 持久化 + 清理热缓存.
+
+        晋升按各记忆自身携带的 scope/scope_id 落库(支持一个会话内混合
+        project/global 写入)。完成后经 event_sink 发 session_end 事件
+        (调度器映射 → forget)。
 
         Args:
             session_id: 会话 ID
-            persist: False 时只清理 L0,不写快照(不恢复)
+            persist: False 时只清理 L0 不晋升(显式丢弃)
+
+        Returns:
+            晋升到 L1 的记忆条数
+
+        历史语义(2026-09 前)为 l0_snapshot 快照持久化,但快照只能恢复回
+        L0、检索通道不可见,等于"存而不用" — 改为晋升后该路径废弃
+        (restore_session/snapshot 模块保留,仅服务旧库快照)。
         """
         self._require_initialized()
-        memories = self._l0.export_session(session_id)
+        promoted = 0
         if persist:
-            await self._snapshots.save_snapshot(session_id, memories)
+            try:
+                promoted = len(
+                    await self._promotion.flush_session(self._engine.conn, session_id)
+                )
+                await self._engine.conn.commit()
+            except Exception:
+                await self._engine.conn.rollback()
+                raise
         self._l0.clear_session(session_id)
-        return len(memories)
+        self._emit_event("session_end", {"session_id": session_id})
+        return promoted
 
     async def restore_session(self, session_id: str) -> int:
         """从快照恢复会话到 L0(load_snapshot + import_session),返回恢复条数.
 
         快照不存在或已过期返回 0(快照保留,幂等可重复恢复).
+        注: close_session 已不再产生新快照,本方法仅服务旧库遗留快照。
         """
         self._require_initialized()
         memories = await self._snapshots.load_snapshot(session_id)

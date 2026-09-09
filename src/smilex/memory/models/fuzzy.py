@@ -124,6 +124,9 @@ class FuzzyMemory:
     entities: list[str] = field(default_factory=list)
     relations: list[str] = field(default_factory=list)
     scope: MemoryScope = MemoryScope.PROJECT
+    # scope 的具体归属(project/tenant ID);随记忆携带,L0 会话混合多 scope
+    # 写入时 close_session flush 仍能按原 scope 晋升(global 时为 None)
+    scope_id: str | None = None
     importance: float = 0.5
     emotion_weight: float = 0.0
     access_count: int = 0
@@ -153,6 +156,7 @@ class FuzzyMemory:
             "entities": list(self.entities),
             "relations": list(self.relations),
             "scope": str(self.scope),
+            "scope_id": self.scope_id,
             "importance": self.importance,
             "emotion_weight": self.emotion_weight,
             "access_count": self.access_count,
@@ -174,6 +178,7 @@ class FuzzyMemory:
             entities=list(d.get("entities", [])),
             relations=list(d.get("relations", [])),
             scope=MemoryScope(d.get("scope", "project")),
+            scope_id=d.get("scope_id"),
             importance=float(d.get("importance", 0.5)),
             emotion_weight=float(d.get("emotion_weight", 0.0)),
             access_count=int(d.get("access_count", 0)),

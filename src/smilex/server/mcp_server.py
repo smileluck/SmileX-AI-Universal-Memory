@@ -9,6 +9,8 @@
   可选 entity(实体名/ID,触发图谱策略)与 time_start/time_end(触发时序策略)
 - memory_write: 沉淀新事实/结论(任务完成、得到新决策时调;带
   error_fingerprint 时按教训协议写【教训】并回链错误指纹)
+- memory_session_end: 结束会话(该会话 L0 工作记忆全部晋升 L1 持久化,
+  对话结束时调一次;不调则短记忆可能随进程退出丢失)
 - memory_report_error: 错误指纹登记(出错时调;同指纹第 2 次起提示沉淀
   教训,已有教训则直接回传内容)
 - memory_init_project: 新项目冷启动 + 扫描生成初始记忆(README/git 历史/
@@ -314,6 +316,8 @@ def create_mcp_server(service: MemoryService) -> MCPServer:
             "需要结构化图遍历(两实体间路径/实体 N 度关系/因果链追溯)时调"
             " memory_graph_query。"
             "任务完成或得到新结论后调 memory_write 沉淀。"
+            "对话结束时调一次 memory_session_end(session_id) 收尾,"
+            "把该会话工作记忆持久化。"
             "遇到报错/失败时调 memory_report_error(code, message):"
             "响应含 lesson 则直接遵循;提示 should_write_lesson 则排查后用"
             " memory_write(error_fingerprint=...) 沉淀教训 — 写清错误原因/"
@@ -431,6 +435,21 @@ def create_mcp_server(service: MemoryService) -> MCPServer:
             )
         payload = build_advice(status, lesson_content)
         return json.dumps(payload, ensure_ascii=False)
+
+    @server.tool(
+        description="结束记忆会话: 该会话 L0 工作记忆全部晋升 L1 持久化"
+        "(不调用则短记忆可能随服务进程退出丢失)。对话/任务结束时调用一次;"
+        "返回晋升条数。"
+    )
+    async def memory_session_end(
+        session_id: str = DEFAULT_SESSION_ID,
+    ) -> str:
+        """会话收尾: flush L0 → L1,返回晋升条数(JSON)."""
+        memory = await service.get()
+        promoted = await memory.close_session(session_id)
+        return json.dumps(
+            {"session_id": session_id, "promoted": promoted}, ensure_ascii=False
+        )
 
     @server.tool(
         description="新项目冷启动 + 扫描生成初始记忆: 传入 project_path 自动读 README、"

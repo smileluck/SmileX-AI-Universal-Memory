@@ -32,6 +32,11 @@ from ..utils.timeutil import to_iso
 
 _logger = get_logger("write")
 
+# 会话写满阈值: 单会话 L0 记忆数达到即 emit memory_full
+# (调度器映射 memory_full → consolidate;阈值远低于 LRU maxsize=1000,
+# 让整合在会话进行中就有机会跑,而不是等淘汰)
+_L0_SESSION_FULL_THRESHOLD = 100
+
 
 def _apply_pii(request: WriteRequest, masker: PIIMasker) -> WriteRequest:
     """写入前 PII 脱敏(§15.4): content/entities 名/三元组自由文本.
@@ -71,6 +76,7 @@ class _WritePathMixin:
     # 宿主类(MemoryMiddleware)提供的共享状态注解(存量 mixin 模式,
     # 此处仅为类型可见性;赋值在宿主 __init__)
     _engine: StorageEngine
+    # 宿主另提供 _emit_event(event_type, payload|None) 方法(事件转发)
 
     # ==================== M.3 写入 ====================
 
@@ -163,6 +169,7 @@ class _WritePathMixin:
                     entities=list(request.entities),
                     relations=triple_ids if not primary_id else [],
                     scope=request.scope,
+                    scope_id=scope_id,
                     importance=request.importance,
                 )
                 if not primary_id:
@@ -183,6 +190,10 @@ class _WritePathMixin:
         except Exception:
             await conn.rollback()
             raise
+        # 会话写满信号(调度器映射 memory_full → consolidate;_enqueue 同名
+        # 去重,重复 emit 无害)
+        if len(self._l0.list(session_id)) >= _L0_SESSION_FULL_THRESHOLD:
+            self._emit_event("memory_full", {"session_id": session_id})
 
         layers = [MemoryLayer.L1_SHORT if promoted_any else MemoryLayer.L0_WORKING]
         if triple_ids:

@@ -216,6 +216,35 @@ class PromotionManager:
             for m in self._l0.list(session_id)
             if m.content is not None and self.needs_promotion(m)
         ]
+        return await self._promote_batch(conn, session_id, candidates, scope_id=scope_id)
+
+    async def flush_session(
+        self,
+        conn: aiosqlite.Connection,
+        session_id: str,
+    ) -> list[str]:
+        """会话结束 flush: 晋升该会话**全部** L0 记忆(持久化闭环).
+
+        与 check_session 的区别: 不做阈值过滤 — L0 里都是写入方显式
+        沉淀的记忆,会话结束即持久是正确默认(短记忆否则会随进程消失)。
+        scope_id 取各记忆自身携带的 scope_id(写入时记录),支持一个
+        会话内混合 project/global 写入。
+        """
+        candidates = [m for m in self._l0.list(session_id) if m.content is not None]
+        return await self._promote_batch(
+            conn, session_id, candidates, scope_id=None, per_memory_scope=True
+        )
+
+    async def _promote_batch(
+        self,
+        conn: aiosqlite.Connection,
+        session_id: str,
+        candidates: list[FuzzyMemory],
+        *,
+        scope_id: str | None = None,
+        per_memory_scope: bool = False,
+    ) -> list[str]:
+        """批量晋升(embed_batch 一次编码),check_session/flush_session 共用."""
         if not candidates:
             return []
         vectors: list | None = None
@@ -228,8 +257,9 @@ class PromotionManager:
         for memory, vector in zip(
             candidates, vectors or [None] * len(candidates), strict=True
         ):
+            effective = memory.scope_id if per_memory_scope else scope_id
             if await self._promote_memory(
-                conn, session_id, memory, scope_id=scope_id, vector=vector
+                conn, session_id, memory, scope_id=effective, vector=vector
             ):
                 promoted.append(memory.id)
         return promoted
